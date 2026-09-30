@@ -1,0 +1,35 @@
+# Line endings are pinned per file type so the deployment artifacts are byte
+# identical no matter whose machine they were committed from.
+#
+# This matters most for deploy/install-centos.sh. A CRLF in a shell script
+# makes bash fail on things like `set -euo pipefail` and on every variable
+# assignment, with errors that point nowhere near the real cause. Relying on
+# each person's core.autocrlf setting to prevent that is not a plan.
+
+# Default: normalise text in the repo, check out with LF everywhere.
+* text=auto eol=lf
+
+# Linux-side artifacts: must be LF, never CRLF.
+*.sh      text eol=lf
+*.service text eol=lf
+*.conf    text eol=lf
+*.py      text eol=lf
+*.toml    text eol=lf
+*.md      text eol=lf
+*.html    text eol=lf
+*.css     text eol=lf
+*.js      text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Windows batch files need CRLF to work at all.
+*.bat     text eol=crlf
+
+# Never touch line endings in binaries.
+*.wav     binary
+*.mp3     binary
+*.pt      binary
+*.pth     binary
+*.safetensors binary
+*.png     binary
+*.ico     binary
