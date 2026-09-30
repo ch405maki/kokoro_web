@@ -39,10 +39,10 @@ fi
 [[ -f "${SRC_DIR}/app/engine.py" ]] || die "run this from inside the project checkout"
 
 log "Installing system packages"
-# rsync and openssl are both used below but are not always present on a minimal
-# Stream 9 install, and `set -e` would abort on a missing one. shadow-utils
-# provides useradd.
-dnf install -y curl ca-certificates tar rsync openssl shadow-utils
+# openssl generates the API key and shadow-utils provides useradd; neither is
+# guaranteed on a minimal Stream 9 image, and `set -e` would abort on a missing
+# one. Deliberately no rsync - the code copy below uses coreutils only.
+dnf install -y curl ca-certificates tar openssl shadow-utils
 # ffmpeg is optional: only needed for format=mp3. Stream 9 ships it in CRB.
 if ! dnf install -y ffmpeg-free >/dev/null 2>&1; then
   dnf install -y https://mirrors.rpmfusion.org/free/el/rpmfusion-free-release-$(rpm -E '%{rhel}').noarch.rpm >/dev/null 2>&1 || true
@@ -62,12 +62,22 @@ install -d -m 0750 -o "${APP_USER}" -g "${APP_USER}" "${STATE_DIR}/huggingface" 
 install -d -m 0750 -o "${APP_USER}" -g "${APP_USER}" "/etc/kokoro"
 
 # --------------------------------------------------------------------- code
-log "Copying application to ${APP_DIR}"
-# Never clobber a local .env or the venv; replace code, keep state.
-rsync -a --delete \
-      --exclude '.venv' --exclude 'output' --exclude '__pycache__' \
-      --exclude '*.wav' --exclude '*.log' --exclude '.git' \
-      "${SRC_DIR}/" "${APP_DIR}/"
+log "Installing application code into ${APP_DIR}"
+# Only a fixed, known set of paths is managed here, so removing each one and
+# re-copying is equivalent to `rsync --delete` while depending on nothing
+# beyond coreutils. The venv and all runtime state are safe because they live
+# outside this list: the venv is created after this step, and state is under
+# ${STATE_DIR}.
+for d in app deploy tests; do
+  rm -rf "${APP_DIR:?}/${d}"
+  cp -a "${SRC_DIR}/${d}" "${APP_DIR}/${d}"
+done
+for f in README.md DEPLOY.md pyproject.toml .gitignore; do
+  if [[ -f "${SRC_DIR}/${f}" ]]; then
+    cp -a "${SRC_DIR}/${f}" "${APP_DIR}/${f}"
+  fi
+done
+find "${APP_DIR}" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 chown -R root:root "${APP_DIR}"
 chmod -R go-w "${APP_DIR}"
 

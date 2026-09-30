@@ -53,36 +53,42 @@ cd kokoro_web
 sudo bash deploy/install-centos.sh
 ```
 
-That is the whole procedure. The installer copies the tree to `/opt/kokoro`
-itself, so you do not need a separate `rsync` step - it resolves the paths
-relative to its own location, which means you can run it straight from the
-clone in your home directory and it still installs correctly.
+That is the whole procedure, and it needs no `rsync`. The installer copies the
+managed directories into `/opt/kokoro` using only coreutils (`rm` + `cp`), and it
+resolves paths relative to its own location, so you can run it straight from the
+clone in your home directory.
 
-If you would rather stage into `/opt/kokoro` first and inspect it, an explicit
-copy works too, and the installer will then re-sync over it idempotently:
+If you would rather stage into `/opt/kokoro` first and inspect it, `cp` works
+too, and the installer will refresh it idempotently:
 
 ```bash
-sudo rsync -a --delete --exclude '.git' kokoro_web/ /opt/kokoro/
+sudo mkdir -p /opt/kokoro
+sudo cp -a app deploy tests README.md DEPLOY.md pyproject.toml /opt/kokoro/
 cd /opt/kokoro && sudo bash deploy/install-centos.sh
 ```
+
+The only system packages the installer asks for are `curl`, `ca-certificates`,
+`tar`, `openssl` and `shadow-utils`, plus `ffmpeg` if you want MP3 output.
 
 ### Do not copy `.venv/`
 
 It contains Windows `.exe` launchers and Windows DLLs - `torch`, `scipy`,
 `spaCy` and `soundfile` are all compiled binaries. Uploading it wastes ~2 GB and
-the installer ignores it, but if you rsync without the exclude above you will
-copy gigabytes that then have to be deleted by hand. The same applies to
-`output/`, which accumulates generated audio.
+the installer ignores it, so if you copy the folder by hand you would copy
+gigabytes that then have to be deleted. The same applies to `output/`, which
+accumulates generated audio.
 
-If you are copying over a network, `rsync --exclude` on the pull is much faster
-than `scp -r` of the whole tree.
+Cloning is the cheapest transfer: `git clone` pulls ~110 KB, whereas `scp -r` of
+the project directory would drag the 904 MB `.venv` and any generated audio
+along with it.
 
 ---
 
 ## 3. Install
 
 ```bash
-cd /opt/kokoro
+git clone https://github.com/ch405maki/kokoro_web.git
+cd kokoro_web
 sudo bash deploy/install-centos.sh
 ```
 
@@ -91,7 +97,7 @@ The installer is idempotent - re-run it after a code update. It will:
 1. verify glibc and refuse on anything older than 2.28
 2. install `curl`, `ca-certificates`, and `ffmpeg` (MP3 output only)
 3. create the unprivileged `kokoro` system user
-4. rsync the code to `/opt/kokoro`
+4. copy the managed directories into `/opt/kokoro` using `rm` + `cp`
 5. install `uv`, then build a Python 3.12 venv
 6. install **CPU-only** torch from `download.pytorch.org/whl/cpu`, then the app
 7. byte-compile the tree and import-check it
@@ -239,20 +245,35 @@ It reports `ready`, `device`, `model`, `load_seconds`, and the voice count -
 ## 8. Updating
 
 ```bash
-# from your PC, after editing
-scp -r app deploy tests user@SERVER_IP:kokoro-staging/
+# on the server
+cd /opt/kokoro
+git pull
+sudo bash deploy/install-centos.sh
+curl -s http://127.0.0.1:8000/health
+```
+
+The installer is idempotent, so `git pull` followed by a re-run refreshes the
+code, leaves the venv and the model cache alone, and re-verifies the import
+before touching systemd. For a routine code push that is all you need.
+
+To copy changed files in from another machine instead, `scp` the managed
+directories over the top and restart:
+
+```bash
+# from your PC
+scp -r app deploy tests user@SERVER_IP:/tmp/kokoro-update/
 
 # on the server
-sudo rsync -a --delete --exclude '.venv' --exclude '__pycache__' \
-    kokoro-staging/ /opt/kokoro/
+sudo cp -a /tmp/kokoro-update/. /opt/kokoro/
 sudo /opt/kokoro/.venv/bin/python -m compileall -q /opt/kokoro/app
 sudo systemctl restart kokoro-tts
 curl -s http://127.0.0.1:8000/health
 ```
 
-`--delete` is safe because `/opt/kokoro` holds no runtime state - the venv is
-excluded and everything mutable lives under `/var/lib/kokoro`. A full
-`bash deploy/install-centos.sh` also works and re-verifies everything, but it
+Replacing whole directories is safe because `/opt/kokoro` holds no runtime
+state: the venv lives in `.venv/` and everything mutable lives under
+`/var/lib/kokoro`. A full `bash deploy/install-centos.sh` also works and
+re-verifies everything, but it
 re-runs `uv python install` and the model warmup, so it is slower for a
 routine code push.
 
