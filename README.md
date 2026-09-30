@@ -190,6 +190,11 @@ Type text, click a voice, adjust speed, press **Generate speech**. You get a
 waveform with playback and a full-width download button. The
 light/dark theme follows your OS setting.
 
+Text you type or paste is auto-formatted to title case: each word is capitalised
+with the rest lowercased, so an all-caps `SAMPLE` becomes `Sample`, while short
+joining words (`the`, `and`, `on`, ...) stay lowercase unless they open the text
+or a sentence.
+
 The character count next to the **Text to speak** label tracks every edit, so a
 paste reports its size the moment it lands. The page is branded **LawPhil TTS
 Studio** and serves its logo from `/static` rather than hotlinking it, so it

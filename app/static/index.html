@@ -305,7 +305,7 @@
         </div>
         <textarea id="text" spellcheck="true" placeholder="Type or paste the text you want spoken here."></textarea>
         <p class="help">
-          Blank lines split the text into separate chunks. Start a word with <code>/</code> to insert a short pause.
+          Text is auto-formatted to title case as you type or paste. Blank lines split it into separate chunks. Start a word with <code>/</code> to insert a short pause.
         </p>
       </fieldset>
     </div>
@@ -400,14 +400,32 @@
   var $ = function (id) { return document.getElementById(id); };
   var state = { voice: "af_heart", url: null, name: null, audio: null, busy: false, voices: [] };
 
+  // Read a response as JSON, but turn a non-JSON body into a readable failure.
+  // When the request never reaches the app -- an nginx error page, a proxy's
+  // 502/503/504, or a 413 from client_max_body_size -- the body is HTML and
+  // JSON.parse would only say "Unexpected token '<'". Repeating the status and
+  // a stripped snippet makes the real cause visible in the banner.
+  function readJSON(r) {
+    return r.text().then(function (body) {
+      var j;
+      try { j = JSON.parse(body); }
+      catch (e) {
+        var snippet = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+        throw new Error("HTTP " + r.status + (snippet ? " \u2014 " + snippet : ""));
+      }
+      if (!r.ok) throw new Error(j.detail || ("HTTP " + r.status));
+      return j;
+    });
+  }
+
   // ---------- boot: engine + voices ----------
-  fetch("/health").then(function (r) { return r.json(); }).then(function (h) {
+  fetch("/health").then(readJSON).then(function (h) {
     $("statusText").textContent = h.ready ? "ready on " + h.device : "cold (loads on first generate)";
     $("dot").dataset.state = h.ready ? "ready" : "idle";
     $("fFoot").textContent = "device: " + h.device + " (threads " + (navigator.hardwareConcurrency || "?") + ")";
   }).catch(function () { $("dot").dataset.state = "error"; $("statusText").textContent = "engine offline"; });
 
-  fetch("/voices").then(function (r) { return r.json(); }).then(function (d) {
+  fetch("/voices").then(readJSON).then(function (d) {
     state.voices = (d.voices || []).filter(function (v) { return v.available; });
     var hidden = (d.voices || []).length - state.voices.length;
     state.voice = d.default || state.voice;
@@ -430,7 +448,7 @@
       note.textContent = hidden + " more need language packs";
       box.appendChild(note);
     }
-  }).catch(function () { $("voices").textContent = "could not load voices"; });
+  }).catch(function (e) { $("voices").textContent = "could not load voices: " + e.message; });
 
   function select(name) {
     state.voice = name;
@@ -453,10 +471,57 @@
   });
   $("speak").addEventListener("click", generate);
 
+  // ---------- title case ----------
+  // Pasted and typed text is normalised to title case: every word is capitalised
+  // with the rest lowercased, so even an all-caps "SAMPLE" lands as "Sample".
+  // Short joining words (articles, prepositions, conjunctions) stay lowercased
+  // unless they open the text or start a new sentence. Only letter case changes,
+  // so the value keeps its exact length and the caret can be restored in place.
+  var SMALL_WORDS = {
+    a: 1, an: 1, and: 1, as: 1, at: 1, but: 1, by: 1, for: 1, from: 1, in: 1,
+    into: 1, nor: 1, of: 1, on: 1, onto: 1, or: 1, over: 1, per: 1, so: 1,
+    the: 1, to: 1, up: 1, via: 1, with: 1, yet: 1
+  };
+  var WORD_RE = /[\p{L}\p{N}][\p{L}\p{N}'\u2019]*/gu;
+  function caseWord(raw, forceCap) {
+    var lower = raw.toLowerCase();
+    var out = (!forceCap && SMALL_WORDS[lower]) ? lower
+      : lower.charAt(0).toUpperCase() + lower.slice(1);
+    // A rare casing pair can change length (e.g. "\u00df" -> "SS"); leave those
+    // alone so the caret math below stays valid.
+    return out.length === raw.length ? out : raw;
+  }
+  function titleCase(text) {
+    var words = [], m;
+    WORD_RE.lastIndex = 0;
+    while ((m = WORD_RE.exec(text))) {
+      words.push({ start: m.index, end: m.index + m[0].length });
+    }
+    if (!words.length) return text;
+    var out = "", prev = 0;
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      var between = text.slice(prev, w.start);
+      var forceCap = i === 0 || /[.!?:\n]\s*$/.test(between);
+      out += between + caseWord(text.slice(w.start, w.end), forceCap);
+      prev = w.end;
+    }
+    return out + text.slice(prev);
+  }
+  function applyTitleCase() {
+    var el = $("text");
+    var before = el.value;
+    var next = titleCase(before);
+    if (next === before) return;
+    var start = el.selectionStart, end = el.selectionEnd;
+    el.value = next;
+    el.setSelectionRange(start, end);
+  }
+
   // ---------- character count ----------
   // Lives next to the label and tracks every edit, so a paste reports itself the
   // moment it lands. `input` fires for paste, typing, cut and undo alike, which
-  // is why there is no separate paste handler to keep in sync.
+  // is why casing is applied there too rather than in a handler per source.
   var countReset = null;
   function showCount(flash) {
     var n = $("text").value.length;
@@ -467,11 +532,11 @@
       countReset = setTimeout(function () { $("charCount").classList.remove("pasted"); }, 1400);
     }
   }
-  $("text").addEventListener("input", function () { showCount(false); });
+  $("text").addEventListener("input", function () { applyTitleCase(); showCount(false); });
   $("text").addEventListener("paste", function () {
-    // The paste event precedes the insertion, so read the count once the
-    // browser has committed the text on the next frame.
-    requestAnimationFrame(function () { showCount(true); });
+    // The paste event precedes the insertion, so normalise and read the count
+    // once the browser has committed the text on the next frame.
+    requestAnimationFrame(function () { applyTitleCase(); showCount(true); });
   });
   showCount(false);
 
@@ -585,12 +650,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     })
-      .then(function (r) {
-        return r.json().then(function (j) {
-          if (!r.ok) throw new Error(j.detail || ("HTTP " + r.status));
-          return j;
-        });
-      })
+      .then(readJSON)
       .then(function (j) {
         var bin = atob(j.audio_base64);
         var buf = new Uint8Array(bin.length);
@@ -603,7 +663,7 @@
         var gen = (j.elapsed != null ? j.elapsed : roundTrip);
         var label = "Ready in " + fmtTime(roundTrip);
         if (Math.abs(gen - roundTrip) > 0.1) {
-          label += " \\u00b7 " + fmtTime(gen) + " synthesised";
+          label += " \u00b7 " + fmtTime(gen) + " synthesised";
         }
         progress("done", label);
         setTime(roundTrip);
