@@ -48,11 +48,22 @@ scp -r `
 Then on the server:
 
 ```bash
-sudo mkdir -p /opt/kokoro
-sudo rsync -a --delete \
-    --exclude '.venv' --exclude 'output' --exclude '__pycache__' \
-    --exclude '*.wav' --exclude '*.log' --exclude '.git' \
-    kokoro-staging/ /opt/kokoro/
+git clone https://github.com/ch405maki/kokoro_web.git
+cd kokoro_web
+sudo bash deploy/install-centos.sh
+```
+
+That is the whole procedure. The installer copies the tree to `/opt/kokoro`
+itself, so you do not need a separate `rsync` step - it resolves the paths
+relative to its own location, which means you can run it straight from the
+clone in your home directory and it still installs correctly.
+
+If you would rather stage into `/opt/kokoro` first and inspect it, an explicit
+copy works too, and the installer will then re-sync over it idempotently:
+
+```bash
+sudo rsync -a --delete --exclude '.git' kokoro_web/ /opt/kokoro/
+cd /opt/kokoro && sudo bash deploy/install-centos.sh
 ```
 
 ### Do not copy `.venv/`

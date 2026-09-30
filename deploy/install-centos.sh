@@ -39,7 +39,10 @@ fi
 [[ -f "${SRC_DIR}/app/engine.py" ]] || die "run this from inside the project checkout"
 
 log "Installing system packages"
-dnf install -y curl ca-certificates tar
+# rsync and openssl are both used below but are not always present on a minimal
+# Stream 9 install, and `set -e` would abort on a missing one. shadow-utils
+# provides useradd.
+dnf install -y curl ca-certificates tar rsync openssl shadow-utils
 # ffmpeg is optional: only needed for format=mp3. Stream 9 ships it in CRB.
 if ! dnf install -y ffmpeg-free >/dev/null 2>&1; then
   dnf install -y https://mirrors.rpmfusion.org/free/el/rpmfusion-free-release-$(rpm -E '%{rhel}').noarch.rpm >/dev/null 2>&1 || true
