@@ -6,6 +6,12 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "kokoro>=0.9.4",
     "misaki[en]>=0.9.4",
+    # kokoro 0.9.4 declares `transformers` with no upper bound, so a fresh
+    # install resolves 5.x. transformers 5.x imports torch._dynamo at module
+    # scope via integrations/deepgemm.py, which on torch 2.14 dies with
+    # "Artifact of type=precompile already registered in mega-cache artifact
+    # factory" during model load. 4.57.x is what kokoro 0.9.4 was built against.
+    "transformers<5",
     "soundfile",
     "espeakng-loader",
     "fastapi",

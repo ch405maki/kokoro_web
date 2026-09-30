@@ -32,6 +32,13 @@ SAMPLE_RATE = 24000
 DEFAULT_VOICE = os.getenv("KOKORO_DEFAULT_VOICE", "af_heart")
 DEFAULT_LANG = os.getenv("KOKORO_DEFAULT_LANG", "a")
 
+# MP3 encoder bitrate. The output is 24 kHz mono speech, so the old 192k default
+# was pure waste: MP3 is a perceptual codec, and above ~96k there is nothing left
+# to hear in a single voice on a narrow band. 96k is the knee of the curve here,
+# roughly half the size of 192k with no measurable difference on speech.
+# Override per deployment with KOKORO_MP3_BITRATE, or per request via `bitrate`.
+MP3_BITRATE = os.getenv("KOKORO_MP3_BITRATE", "96k").strip().lower()
+
 # ---------------------------------------------------------------- device setup
 
 def _configure_threads() -> None:
@@ -292,7 +299,7 @@ def chunks_to_wav(chunks: list[Synthesized], gap: float = 0.0) -> bytes:
     return buf.getvalue()
 
 
-def chunks_to_mp3(chunks: list[Synthesized], bitrate: str = "192k",
+def chunks_to_mp3(chunks: list[Synthesized], bitrate: str | None = None,
                   gap: float = 0.0) -> bytes:
     """Requires ffmpeg on PATH (used only when the caller asks for mp3)."""
     import shutil
@@ -303,6 +310,7 @@ def chunks_to_mp3(chunks: list[Synthesized], bitrate: str = "192k",
     if not ffmpeg:
         raise RuntimeError("ffmpeg not found on PATH; request format=wav instead")
 
+    bitrate = normalise_bitrate(bitrate)
     wav = chunks_to_wav(chunks, gap=gap)
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "in.wav"
@@ -320,14 +328,36 @@ def chunks_to_mp3(chunks: list[Synthesized], bitrate: str = "192k",
 
 CONTENT_TYPES = {"wav": "audio/wav", "mp3": "audio/mpeg"}
 
+# lame accepts an arbitrary bitrate string, so constrain it to the standard MP3
+# rates. This keeps a caller-supplied value from reaching ffmpeg unvalidated.
+ALLOWED_BITRATES = frozenset(
+    f"{k}k" for k in (32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320)
+)
+
+
+def normalise_bitrate(bitrate: str | None) -> str:
+    """Validate a caller bitrate, falling back to the configured default."""
+    if bitrate is None or not str(bitrate).strip():
+        candidate = MP3_BITRATE
+    else:
+        candidate = str(bitrate).strip().lower()
+        if candidate.isdigit():
+            candidate += "k"  # accept "96" as shorthand for "96k"
+    if candidate not in ALLOWED_BITRATES:
+        raise ValueError(
+            f"unsupported mp3 bitrate: {bitrate}. Use one of "
+            f"{', '.join(sorted(ALLOWED_BITRATES, key=lambda s: int(s[:-1])))}"
+        )
+    return candidate
+
 
 def encode(chunks: list[Synthesized], fmt: str = "wav",
-           gap: float = 0.0) -> tuple[bytes, str]:
+           gap: float = 0.0, bitrate: str | None = None) -> tuple[bytes, str]:
     """Serialise synthesised chunks, inserting ``gap`` seconds of silence
     between them."""
     fmt = fmt.lower().lstrip(".")
     if fmt == "wav":
         return chunks_to_wav(chunks, gap=gap), CONTENT_TYPES["wav"]
     if fmt == "mp3":
-        return chunks_to_mp3(chunks, gap=gap), CONTENT_TYPES["mp3"]
+        return chunks_to_mp3(chunks, bitrate=bitrate, gap=gap), CONTENT_TYPES["mp3"]
     raise ValueError(f"unsupported format: {fmt}")

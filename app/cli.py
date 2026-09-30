@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--format", dest="fmt", choices=["wav", "mp3"], default="wav",
                    help="Audio format (default: %(default)s)")
     p.add_argument("--out", "-o", type=Path, help="Output file (default: timestamped file in ./output)")
+    p.add_argument("--bitrate", help="MP3 only, e.g. 96k (default: KOKORO_MP3_BITRATE)")
     p.add_argument("--gap", type=float, default=0.12, help="Silence between chunks, seconds")
     p.add_argument("--split-pattern", help="Custom regex chunker, e.g. r'\\n+'")
     p.add_argument("--no-join", action="store_true", help="Write one file per chunk instead of joining")
@@ -123,12 +124,12 @@ def main(argv: list[str] | None = None) -> int:
         for i, c in enumerate(chunks):
             path = args.out.with_name(f"{args.out.stem}-{i:03d}{args.out.suffix}") if args.out else E.OUTPUT_DIR / f"{args.voice}-{i:03d}.{args.fmt}"
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(E.encode([c], args.fmt, gap=0.0)[0])
+            path.write_bytes(E.encode([c], args.fmt, gap=0.0, bitrate=args.bitrate)[0])
             written.append(path)
     else:
         target = args.out or E.OUTPUT_DIR / f"{args.voice}-{time.strftime('%Y%m%d-%H%M%S')}.{args.fmt}"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(E.encode(chunks, args.fmt, gap=args.gap)[0])
+        target.write_bytes(E.encode(chunks, args.fmt, gap=args.gap, bitrate=args.bitrate)[0])
         written.append(target)
 
     total = sum(c.duration for c in chunks)

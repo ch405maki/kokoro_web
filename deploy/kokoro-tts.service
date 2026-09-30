@@ -64,9 +64,12 @@ RestrictRealtime=yes
 RestrictNamespaces=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 LockPersonality=yes
-# Safe because we never call torch.compile / inductor, which needs W^X memory.
-# If you add a JIT feature later, set this to no and restart.
-MemoryDenyWriteExecute=yes
+# MUST stay "no". torch bundles oneDNN, whose CPU backend JIT-compiles kernels
+# into anonymous executable memory, so denying W^X makes every /speak request
+# fail with 500 {"detail":"could not create a primitive"} even though the server
+# starts cleanly and /health reports ok. This is not only about
+# torch.compile/inductor -- plain CPU inference needs it too.
+MemoryDenyWriteExecute=no
 
 # Only these paths are writable. Everything else is read-only.
 ReadWritePaths=/var/lib/kokoro

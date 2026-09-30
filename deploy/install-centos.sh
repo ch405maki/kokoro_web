@@ -102,8 +102,11 @@ uv pip install --python "${VPY}" torch \
   --index-strategy unsafe-best-match
 
 log "Installing application dependencies"
+# transformers is pinned <5 on purpose: kokoro 0.9.4 declares it unbounded, and
+# 5.x imports torch._dynamo at module scope, which breaks model loading on
+# torch 2.x. Keep this in sync with pyproject.toml.
 uv pip install --python "${VPY}" \
-  "kokoro>=0.9.4" "misaki[en]>=0.9.4" soundfile espeakng-loader \
+  "kokoro>=0.9.4" "misaki[en]>=0.9.4" "transformers<5" soundfile espeakng-loader \
   fastapi "uvicorn[standard]" python-multipart numpy
 
 # The unit file mounts /opt read-only, so precompile .pyc now while we still

@@ -303,7 +303,7 @@ def main() -> int:
     print("\n[web ui]")
     status, headers, body = get("/")
     check("GET / returns HTML", status == 200 and headers.get("Content-Type", "").startswith("text/html"))
-    check("page contains the app markup", b"Kokoro TTS" in body)
+    check("page contains the app markup", b"LawPhil TTS Studio" in body)
     status, _, _ = get("/docs")
     check("GET /docs serves OpenAPI UI", status == 200)
     status, _, raw = get("/openapi.json")

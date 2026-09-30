@@ -18,27 +18,40 @@ Three ways in, all sharing one engine:
 
 | | |
 |---|---|
-| Device | `cpu` (AMD Ryzen 7 5700G, no CUDA GPU detected) |
+| Device | `cpu` (Intel Xeon E5-2603 v4 @ 1.70 GHz, no CUDA GPU detected) |
 | Torch | 2.14.0+cpu |
+| Transformers | 4.57.6 (pinned `<5`; see [deployment gotchas](#two-things-that-break-a-systemd-deployment-silently)) |
 | Model | `hexgrad/Kokoro-82M`, cached locally |
 | Sample rate | 24000 Hz, mono |
 | Voices | 54 published, **41 usable** with the packs installed |
 | Languages | `a` `b` (English) `e` `f` `h` `i` `p` (espeak) |
-| Throughput | ~2.7x realtime, cold start ~6 s, first-ever run ~33 s |
+| Throughput | ~1.3x realtime, warm model load ~13 s, first-ever run ~48 s |
 
-Measured on this machine with `.venv\Scripts\python.exe -m tests.bench`:
+Measured on this machine with `.venv/bin/python -m tests.bench`:
 
 ```
+device = cpu
+model load (warm from disk) = 13.15s
+
 case              chars    audio      gen     xRT  chunks
 ---------------------------------------------------------
-one sentence         44    3.25s    1.24s    2.6x       1
-one paragraph       219   14.57s    5.40s    2.7x       1
-three paragraphs    307   19.03s    7.04s    2.7x       3
+one sentence         44    3.25s    1.98s    1.6x       1
+one paragraph       219   14.57s   10.82s    1.3x       1
+three paragraphs    307   19.03s   14.41s    1.3x       3
 ```
 
-`xRT` is audio seconds produced per second of compute, so `2.7x` means a one-minute
-narration takes about 22 seconds. A discrete NVIDIA GPU raises this substantially;
+`xRT` is audio seconds produced per second of compute, so `1.3x` means a one-minute
+narration takes about 45 seconds. A discrete NVIDIA GPU raises this substantially;
 see [Using a GPU](#using-a-gpu).
+
+**Throughput is very much per-CPU.** The numbers above come from a 2016-era Xeon
+E5-2603 v4 at 1.7 GHz sharing 6 cores with nginx and several containers. The same
+code on a Ryzen 7 5700G benchmarks around `2.7x`, roughly twice as fast, because
+Kokoro is a small model and this is almost entirely single-thread work. Judge
+throughput on your own box with `tests.bench` before assuming a duration. Note
+also that a *first* CLI or one-shot process looks far slower than these figures
+(0.2x or worse) simply because it pays the ~13 s model load inside the measured
+window; the served API loads once at startup, so requests are steady-state.
 
 ---
 
@@ -136,7 +149,10 @@ long input, which is the main reason the wrapper chunks for you.
 
 Audio is returned as 24 kHz mono. WAV is written directly in memory with
 `soundfile`; MP3 shells out to the `ffmpeg` already on your PATH and returns a
-clear error if it is ever missing.
+clear error if it is ever missing. MP3 defaults to `96k`, not the `192k` you
+might expect: this is one narrow-band voice, and past ~96k the extra bits are
+invisible while the file gets twice as big. Override with `KOKORO_MP3_BITRATE`
+or per request with `bitrate`.
 
 ### Architecture
 
@@ -171,8 +187,17 @@ run_server.bat
 Then open **http://127.0.0.1:8000**.
 
 Type text, click a voice, adjust speed, press **Generate speech**. You get a
-waveform with playback, a phoneme breakdown, download, and save-to-disk. The
+waveform with playback, a phoneme breakdown, and a download button. The
 light/dark theme follows your OS setting.
+
+The character count next to the **Text to speak** label tracks every edit, so a
+paste reports its size the moment it lands. The page is branded **LawPhil TTS
+Studio** and serves its logo from `/static` rather than hotlinking it, so it
+still renders on a client with no route to the internet.
+
+The UI only ever *downloads* audio. It does not write to `output/`; the
+`save=true` path below is still available to API callers, it is just not wired
+to a button.
 
 The page renders from a single `POST /speak/meta` call, so the audio and the
 grapheme→IPA breakdown you see come from the *same* synthesis pass. Asking
@@ -196,6 +221,7 @@ Returns raw audio bytes.
 | `voice` | string | `af_heart` | 54 published, 41 usable |
 | `speed` | float | `1.0` | 0.5–2.0 |
 | `format` | string | `wav` | `wav` or `mp3` |
+| `bitrate` | string | `KOKORO_MP3_BITRATE` (`96k`) | MP3 only. `32k`–`320k`, or a bare number meaning `k` |
 | `gap` | float | `0.12` | seconds of silence between chunks |
 | `split_pattern` | string | `null` | custom chunker regex |
 
@@ -261,7 +287,7 @@ Response headers carry timing metadata: `x-chunk-count`, `x-generation-seconds`,
 | `GET /voices?lang=b` | Filter by locale prefix (`a`/`b`/`af`/`bf`) |
 | `POST /warmup` | Load the model now so the first real request is fast |
 | `POST /speak/meta` | Same audio as base64 **plus** per-chunk phonemes and durations |
-| `POST /speak/form` | `multipart/form-data` — what the web UI uses; `save=true` writes to `output/` |
+| `POST /speak/form` | `multipart/form-data`; `save=true` writes to `output/`. No longer used by the web UI |
 | `GET /download/{name}` | Fetch a file previously saved with `save=true` |
 | `GET /docs` | Swagger UI |
 | `GET /openapi.json` | OpenAPI schema |
@@ -314,6 +340,7 @@ Or call the module directly, which is what the batch file wraps:
 | `--out`, `-o` | Output path (default: timestamped file in `output/`) |
 | `--text-file`, `-t` / `--stdin` | Read text from a file or a pipe |
 | `--gap` | Silence between chunks, seconds |
+| `--bitrate` | MP3 only, e.g. `96k` (default: `KOKORO_MP3_BITRATE`) |
 | `--split-pattern` | Custom chunker regex |
 | `--no-join` | One file per chunk instead of one joined file |
 | `--show-phonemes` | Print graphemes and IPA per chunk |
@@ -359,6 +386,7 @@ All optional, via environment variables:
 | `KOKORO_DEVICE` | auto-detected | Force `cpu`, `cuda`, or `mps` |
 | `KOKORO_THREADS` | CPU count | Torch thread limit |
 | `KOKORO_MODEL_REPO` | `hexgrad/Kokoro-82M` | Alternative model repo |
+| `KOKORO_MP3_BITRATE` | `96k` | Default MP3 bitrate. 24 kHz mono speech tops out well below 192k |
 | `KOKORO_OUTPUT_DIR` | `./output` | Where saved files land |
 | `KOKORO_DEFAULT_VOICE` | `af_heart` | CLI and API default |
 | `KOKORO_DEFAULT_LANG` | `a` | Startup warmup language |
@@ -457,6 +485,32 @@ this and also rate limits per client IP.
 Rate limiting is not built in. Synthesis is CPU-bound and single-worker, so one
 caller can queue the server for everyone else; put nginx or a rate-limit-aware proxy
 in front if the port is not on a trusted network.
+
+#### Two things that break a systemd deployment silently
+
+Both of these fail *after* the server starts and `/health` reports `ok`, so they
+are easy to miss.
+
+**`MemoryDenyWriteExecute=yes` breaks every synthesis request.** torch bundles
+oneDNN, whose CPU backend JIT-compiles kernels into anonymous executable memory.
+Deny W^X and that mmap fails, so `/warmup` succeeds and then every `/speak`
+returns `500 {"detail":"could not create a primitive"}`. This is *not* limited to
+`torch.compile`/inductor, which is what the hardening comment in
+`deploy/kokoro-tts.service` assumed — plain CPU inference trips it. The shipped
+unit is corrected to `MemoryDenyWriteExecute=no`; every other sandbox directive
+stays on.
+
+**An unpinned `transformers` breaks model loading.** `kokoro` 0.9.4 declares
+`transformers` with no upper bound, so a fresh install resolves 5.x, which
+imports `torch._dynamo` at module scope. On torch 2.14 that raises
+`Artifact of type=precompile already registered in mega-cache artifact factory`
+partway through loading the model. `pyproject.toml` now pins `transformers<5`.
+
+On SELinux hosts there is a third, which fails at `systemctl reload nginx`
+rather than at runtime: a `listen` on a port outside the policy's
+`http_port_t` list gets `bind() ... (13: Permission denied)` even though
+`nginx -t` passes. Fix with `semanage port -a -t http_port_t -p tcp <port>`.
+Note 8082 already ships as `us_cli_port_t`, so that one needs `-m`, not `-a`.
 
 ### Scaling up
 

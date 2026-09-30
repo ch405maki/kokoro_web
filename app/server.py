@@ -80,6 +80,10 @@ class SpeakRequest(BaseModel):
     voice: str = Field(E.DEFAULT_VOICE, description="Voice id, e.g. af_heart")
     speed: float = Field(1.0, ge=0.5, le=2.0)
     format: str = Field("wav", pattern="^(wav|mp3)$")
+    bitrate: str | None = Field(
+        None,
+        description="MP3 only. e.g. '96k'. Defaults to KOKORO_MP3_BITRATE.",
+    )
     gap: float = Field(0.12, ge=0.0, le=2.0, description="Silence between chunks (s)")
     split_pattern: str | None = Field(
         None, description="Regex chunker. Defaults to paragraphs when gap > 0."
@@ -149,8 +153,15 @@ def speak_json(req: SpeakRequest) -> Response:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     elapsed = round(time.perf_counter() - started, 3)
+    # An unusable bitrate is the caller's mistake, so validate before encoding
+    # rather than surfacing it as a 500 from deep inside ffmpeg.
     try:
-        audio, content_type = E.encode(chunks, req.format, gap=req.gap)
+        E.normalise_bitrate(req.bitrate)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        audio, content_type = E.encode(chunks, req.format, gap=req.gap,
+                                       bitrate=req.bitrate)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -176,7 +187,7 @@ def speak_meta(req: SpeakRequest) -> JSONResponse:
         chunks = E.get_engine().synthesize(
             text=req.text, voice=req.voice, speed=req.speed, split_pattern=req.split_pattern
         )
-        audio, _ = E.encode(chunks, req.format, gap=req.gap)
+        audio, _ = E.encode(chunks, req.format, gap=req.gap, bitrate=req.bitrate)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -218,15 +229,18 @@ def speak_form(
     voice: str = Form(E.DEFAULT_VOICE),
     speed: float = Form(1.0),
     format: str = Form("wav"),
+    bitrate: str = Form(None),
     gap: float = Form(0.12),
     save: bool = Form(False),
 ):
     """Browser-friendly multipart endpoint used by the bundled web UI."""
-    req = SpeakRequest(text=text, voice=voice, speed=speed, format=format, gap=gap)
+    req = SpeakRequest(text=text, voice=voice, speed=speed, format=format,
+                       gap=gap, bitrate=bitrate)
     chunks = E.get_engine().synthesize(
         text=req.text, voice=req.voice, speed=req.speed, split_pattern=req.split_pattern
     )
-    audio, content_type = E.encode(chunks, req.format, gap=req.gap)
+    audio, content_type = E.encode(chunks, req.format, gap=req.gap,
+                                   bitrate=req.bitrate)
 
     if save:
         E.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
