@@ -187,7 +187,7 @@ run_server.bat
 Then open **http://127.0.0.1:8000**.
 
 Type text, click a voice, adjust speed, press **Generate speech**. You get a
-waveform with playback, a phoneme breakdown, and a download button. The
+waveform with playback and a full-width download button. The
 light/dark theme follows your OS setting.
 
 The character count next to the **Text to speak** label tracks every edit, so a
@@ -200,9 +200,11 @@ The UI only ever *downloads* audio. It does not write to `output/`; the
 to a button.
 
 The page renders from a single `POST /speak/meta` call, so the audio and the
-grapheme→IPA breakdown you see come from the *same* synthesis pass. Asking
-`/speak/form` as well would double the work, since synthesis is the expensive
-part. A **Pause between chunks** slider controls the inter-chunk silence.
+server's own synthesis timing come from the *same* pass. Asking `/speak` as well
+would double the work, since synthesis is the expensive part. The grapheme→IPA
+breakdown that endpoint returns is API-only: to inspect it, call `/speak/meta`
+directly or run the CLI with `--show-phonemes`. A **Pause between chunks** slider
+controls the inter-chunk silence.
 
 `run_server.bat 8000 0.0.0.0` binds a different port or interface — see
 [Exposing it on your network](#exposing-it-on-your-network).
