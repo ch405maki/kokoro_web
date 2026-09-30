@@ -320,10 +320,8 @@
         <div id="result" hidden>
           <div class="wave" id="wave" aria-hidden="true"></div>
           <div class="meta">
-            <span>duration <b id="mDur">0.00s</b></span>
             <span>chunks <b id="mChunks">0</b></span>
             <span>generated in <b id="mGen">0.00s</b></span>
-            <span>device <b id="mDev">cpu</b></span>
             <span>size <b id="mSize">0 KB</b></span>
           </div>
           <audio id="audio" controls preload="none" style="width:100%;margin-top:14px"></audio>
@@ -490,8 +488,41 @@
   // cost of base64-encoding the audio and sending it over the wire.
   var tick = null, startedAt = 0;
 
+  function pad2(v) {
+    var dot = v.indexOf(".");
+    var head = dot < 0 ? v : v.slice(0, dot);
+    return (head.length < 2 ? "0" + head : head) + (dot < 0 ? "" : v.slice(dot));
+  }
+
+  // Elapsed wall-clock, promoted to minutes and then hours once it needs them,
+  // so a slow synthesis reads as 4m 12.3s rather than 252.3s. The value is
+  // rounded to the displayed precision before it is split, otherwise 59.98s
+  // would come out as "60.0s" instead of "1m 00.0s".
+  function fmtParts(sec, dp) {
+    var d = (dp == null ? 1 : dp);
+    var scale = Math.pow(10, d);
+    var s = Math.round(Math.max(0, sec) * scale) / scale;
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s - h * 3600) / 60);
+    var rest = s - h * 3600 - m * 60;
+    var parts = [];
+    if (h) parts.push([String(h), "h"]);
+    if (h || m) parts.push([h ? pad2(String(m)) : String(m), "m"]);
+    var ss = rest.toFixed(d);
+    parts.push([parts.length ? pad2(ss) : ss, "s"]);
+    return parts;
+  }
+
+  // Plain-text form, for labels that are written with textContent.
+  function fmtTime(sec, dp) {
+    return fmtParts(sec, dp).map(function (p) { return p[0] + p[1]; }).join(" ");
+  }
+
   function setTime(sec) {
-    $("pTime").innerHTML = sec.toFixed(1) + '<span class="unit">s</span>';
+    // The unit letters are dimmed through .unit, so build the markup per part.
+    $("pTime").innerHTML = fmtParts(sec).map(function (p) {
+      return p[0] + '<span class="unit">' + p[1] + "</span>";
+    }).join(" ");
   }
 
   function progress(stateName, label) {
@@ -570,9 +601,9 @@
         // Prefer the server's measured synthesis time; fall back to the
         // round-trip if the field is ever missing.
         var gen = (j.elapsed != null ? j.elapsed : roundTrip);
-        var label = "Ready in " + roundTrip.toFixed(1) + "s";
+        var label = "Ready in " + fmtTime(roundTrip);
         if (Math.abs(gen - roundTrip) > 0.1) {
-          label += " \\u00b7 " + gen.toFixed(1) + "s synthesised";
+          label += " \\u00b7 " + fmtTime(gen) + " synthesised";
         }
         progress("done", label);
         setTime(roundTrip);
@@ -582,13 +613,22 @@
         fail("Generation failed: " + String(e.message || e).replace(/</g, "&lt;"));
         $("dot").dataset.state = "error";
         var secs = (performance.now() - t0) / 1000;
-        progress("error", "Failed after " + secs.toFixed(1) + "s");
+        progress("error", "Failed after " + fmtTime(secs));
         setTime(secs);
       })
       .finally(function () { busy(false); });
   }
 
   // ---------- render ----------
+  // File size, promoted the same way the clock is: KB until it needs MB, then
+  // GB. Binary (1024) to match the KB figure this replaces, so the number does
+  // not shift when the unit changes. Two decimals below 10, none above.
+  function fmtSize(bytes) {
+    var units = ["B", "KB", "MB", "GB"], i = 0, n = Math.max(0, bytes);
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n : n.toFixed(n < 10 ? 2 : 0)) + " " + units[i];
+  }
+
   function render(blob, elapsed) {
     var fmt = $("format").value;
     if (state.url) URL.revokeObjectURL(state.url);
@@ -602,8 +642,8 @@
     $("emptyMsg").hidden = true;
     $("result").hidden = false;
     $("player").classList.remove("empty");
-    $("mSize").textContent = (blob.size / 1024).toFixed(0) + " KB";
-    $("mGen").textContent = elapsed.toFixed(2) + "s";
+    $("mSize").textContent = fmtSize(blob.size);
+    $("mGen").textContent = fmtTime(elapsed, 2);
 
     // Peek at the real duration + a coarse waveform via WebAudio.
     decode(blob);
@@ -641,7 +681,6 @@
           Array.prototype.forEach.call(wave.children, function (el) { el.classList.remove("on"); });
         });
         audio.addEventListener("play", mark);
-        $("mDur").textContent = duration.toFixed(2) + "s";
         ctx.close();
       }).catch(function () { ctx.close(); });
   }
