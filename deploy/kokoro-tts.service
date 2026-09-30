@@ -1,0 +1,81 @@
+[Unit]
+Description=Kokoro TTS API (Kokoro-82M text-to-speech)
+Documentation=https://github.com/hexgrad/kokoro
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=kokoro
+Group=kokoro
+WorkingDirectory=/opt/kokoro
+
+# --- application settings -------------------------------------------------
+# Authenticate every request except GET /health. Generate with:
+#   openssl rand -hex 32
+# Comment this out to run unauthenticated on a trusted network only.
+Environment=KOKORO_API_KEY=CHANGE_ME_PASTE_A_RANDOM_HEX_STRING
+
+# Persistent model cache. Must be writable by User= above. Point it at a real
+# volume on a containerised host so the 330 MB download survives redeploys.
+Environment=HF_HOME=/var/lib/kokoro/huggingface
+Environment=KOKORO_OUTPUT_DIR=/var/lib/kokoro/output
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+# /opt/kokoro is mounted read-only below, so do not try to write .pyc files.
+Environment=PYTHONDONTWRITEBYTECODE=1
+# Uncomment after the first successful boot to guarantee zero network at runtime.
+#Environment=HF_HUB_OFFLINE=1
+
+# --- runtime --------------------------------------------------------------
+EnvironmentFile=-/etc/kokoro/tts.env
+ExecStart=/opt/kokoro/.venv/bin/uvicorn app.server:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 1 \
+    --timeout-keep-alive 75 \
+    --no-access-log
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+# --- logging --------------------------------------------------------------
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kokoro-tts
+
+# --- hardening ------------------------------------------------------------
+# The service reads code and model weights and writes audio files. It needs no
+# new privileges, no write access to /usr or /etc, and no Linux capabilities.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+# Safe because we never call torch.compile / inductor, which needs W^X memory.
+# If you add a JIT feature later, set this to no and restart.
+MemoryDenyWriteExecute=yes
+
+# Only these paths are writable. Everything else is read-only.
+ReadWritePaths=/var/lib/kokoro
+
+# Cap resources so one request cannot starve the host.
+MemoryMax=4G
+MemoryHigh=3G
+TasksMax=256
+CPUWeight=100
+
+[Install]
+WantedBy=multi-user.target

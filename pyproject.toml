@@ -1,0 +1,22 @@
+[project]
+name = "kokoro-local"
+version = "1.0.0"
+description = "Local Kokoro-82M TTS: CLI, REST API, and web UI"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "kokoro>=0.9.4",
+    "misaki[en]>=0.9.4",
+    "soundfile",
+    "espeakng-loader",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "jinja2",
+    "numpy",
+]
+
+[dependency-groups]
+dev = ["httpx"]
+
+[tool.setuptools]
+packages = ["app"]

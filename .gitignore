@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Kokoro runtime
+output/*
+!output/.gitkeep
+*.log
+install.log
+warmup.log
+server.log
+server.err
+*.ps1.tmp
+
+# Local secrets — never commit a real key
+.env
+*.env
+!.env.example
+/kokoro-staging/
+
+# HuggingFace model cache (weights are ~330 MB, re-downloadable)
+models/
+*.pt
+*.pth
+*.safetensors
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
