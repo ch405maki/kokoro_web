@@ -72,7 +72,7 @@ for d in app deploy tests; do
   rm -rf "${APP_DIR:?}/${d}"
   cp -a "${SRC_DIR}/${d}" "${APP_DIR}/${d}"
 done
-for f in README.md DEPLOY.md pyproject.toml .gitignore; do
+for f in README.md DEPLOY.md pyproject.toml .gitignore config.json; do
   if [[ -f "${SRC_DIR}/${f}" ]]; then
     cp -a "${SRC_DIR}/${f}" "${APP_DIR}/${f}"
   fi

@@ -195,6 +195,35 @@ with the rest lowercased, so an all-caps `SAMPLE` becomes `Sample`, while short
 joining words (`the`, `and`, `on`, ...) stay lowercase unless they open the text
 or a sentence.
 
+### Auto-Format for legal text
+
+Pasted text is sent through `POST /preprocess` and the cleaned result is written
+back into the same **Text to speak** box, so there is only ever one copy of the
+text. It also runs again before **Generate speech** if you have edited the text
+since, which means the audio is always built from cleaned text. **Auto-Format**
+next to the character count re-runs it on demand.
+
+It is a text pass, not a model call, so it is effectively instant. It does five
+things, in order:
+
+| Step | What it does | Example |
+|---|---|---|
+| A | Drops footnote references and editorial apparatus | `Certiorari1`, `respondents.2`, `[1]`, `[sic]`, `[a.f.]`, `(awÞhi`, `(Emphasis supplied)` |
+| B | Repairs OCR damage and collapses runs of spaces | `prope1iies` → `properties`, `1s` → `is`, `[j]ust` → `just` |
+| C | Expands configured legal abbreviations | `G.R. No.` → `G.R. Number`, `CA` → `Court of Appeals` |
+| D | Spells out currency and percentages | `PHP 91,575.65` → `Ninety-One Thousand Five Hundred Seventy-Five Pesos and Sixty-Five Centavos`, `10%` → `ten percent` |
+| E | Normalises whitespace and punctuation | blank-line runs collapse, single space after `,` `:` `;` |
+
+Two deliberate limits: a `No.` is only read as a citation marker when a number
+follows, so `No person shall...` is untouched, and text inside `>` blockquotes or
+double quotes is reproduced byte for byte, because a quoted passage is often
+being read aloud as written.
+
+Mappings live in `config.json` at the repo root, so you can retune them without
+touching the code. It is parsed once at startup; if it is missing or malformed
+the built-in defaults are used and the server still starts. Add a `"_comment"`
+key alongside any entry and it is ignored by the matcher.
+
 The character count next to the **Text to speak** label tracks every edit, so a
 paste reports its size the moment it lands. The page is branded **LawPhil TTS
 Studio** and serves its logo from `/static` rather than hotlinking it, so it
@@ -217,6 +246,18 @@ controls the inter-chunk silence.
 ### 3b. REST API
 
 Interactive reference with a working "try it" form: **http://127.0.0.1:8000/docs**
+
+#### `POST /preprocess` — clean legal text without synthesising
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `text` | string | `""` | may be empty |
+
+Returns `{"text": "...", "changed": true|false}`, where `text` is the cleaned
+result and `changed` is `false` when the input needed no cleaning. `changed`
+ignores surrounding whitespace, so a tidy document is not reported as edited
+just because the response ends with a newline. See
+[Auto-Format for legal text](#auto-format-for-legal-text) for what it changes.
 
 #### `POST /speak` — the main endpoint
 
@@ -360,9 +401,12 @@ Or call the module directly, which is what the batch file wraps:
 ## 4. Verifying it works
 
 ```powershell
-# full API suite: 56 checks, server must already be running
+# full API suite: 64 checks, server must already be running
 run_server.bat                                # terminal 1
 .venv\Scripts\python.exe tests\test_api.py   # terminal 2
+
+# preprocessor suite: 39 tests, no server needed
+.venv\Scripts\python.exe -m unittest tests.test_preprocessor -v
 
 # throughput table
 .venv\Scripts\python.exe tests\bench.py
@@ -371,16 +415,26 @@ run_server.bat                                # terminal 1
 Run `test_api.py` **as a script path**, not with `-m`. It is a plain script with a
 `main()`, not a `unittest.TestCase`, so `-m tests.test_api` imports it, finds no
 test cases, and exits reporting "Ran 0 tests" without complaining - an easy way to
-mistake a broken server for a passing suite.
+mistake a broken server for a passing suite. `test_preprocessor.py` is a real
+`unittest` module, so `-m` is correct there.
 
-Latest run on this machine: **56/56 passed.** The suite covers every endpoint,
-speed and voice differentiation, WAV header parsing, chunk splitting, MP3
-encoding, path-traversal rejection, and the unavailable-language-pack path. It
+Set `PYTHONIOENCODING=utf-8` first. The console defaults to cp1252 on Windows and
+the suite prints IPA, and will die with `UnicodeEncodeError` partway through
+otherwise.
+
+Latest run on this machine: **64/64 API checks and 39/39 preprocessor tests
+passed.** The API suite covers every endpoint, speed and voice differentiation,
+WAV header parsing, chunk splitting, MP3 encoding, path-traversal rejection, the
+unavailable-language-pack path, and `POST /preprocess`. It
 also asserts the auth posture (off by default) and that `gap` genuinely inserts
 silence: two renders of the same multi-chunk text are compared and the difference
 must equal `gap x (chunks - 1)` within 250 ms. That last one exists because `gap`
 was originally accepted by the API and then dropped on the floor, so every
 paragraph ran together with no pause.
+
+Start the server *after* pulling changes. A stale process still listening on
+8000 will happily answer the old endpoint set, and new checks fail with a 404
+that looks like a routing bug.
 
 ---
 
@@ -539,12 +593,15 @@ accordingly.
 ```
 app/
   engine.py           model loading, synthesis, voice catalog, wav/mp3 encoding
-  server.py           FastAPI app: /speak /voices /health /warmup /docs
+  server.py           FastAPI app: /speak /preprocess /voices /health /warmup /docs
   cli.py              argparse CLI
+  legal_preprocessor.py  legal-text cleaner behind /preprocess
   static/index.html   web UI, self-contained, no build step
 tests/
-  test_api.py         56-check end-to-end suite
+  test_api.py         64-check end-to-end suite
+  test_preprocessor.py  39-test preprocessor suite (unittest, no server needed)
   bench.py            throughput benchmark
+config.json           abbreviation / OCR / currency mappings for the preprocessor
 output/               generated audio (gitignored)
 deploy/
   install-centos.sh   idempotent CentOS Stream/Rocky/Alma 9 installer

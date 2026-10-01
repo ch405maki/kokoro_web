@@ -41,7 +41,7 @@ From your Windows machine, excluding the Windows virtual environment:
 # from the Kokoro folder on your PC
 scp -r `
   app deploy tests `
-  DEPLOY.md README.md pyproject.toml .gitignore `
+  DEPLOY.md README.md pyproject.toml .gitignore config.json `
   user@SERVER_IP:kokoro-staging/
 ```
 
@@ -63,12 +63,22 @@ too, and the installer will refresh it idempotently:
 
 ```bash
 sudo mkdir -p /opt/kokoro
-sudo cp -a app deploy tests README.md DEPLOY.md pyproject.toml /opt/kokoro/
+sudo cp -a app deploy tests README.md DEPLOY.md pyproject.toml config.json /opt/kokoro/
 cd /opt/kokoro && sudo bash deploy/install-centos.sh
 ```
 
 The only system packages the installer asks for are `curl`, `ca-certificates`,
 `tar`, `openssl` and `shadow-utils`, plus `ffmpeg` if you want MP3 output.
+
+### `config.json` is live configuration, not just a file
+
+`config.json` holds the abbreviation, OCR and currency mappings used by
+`POST /preprocess`. It sits at `/opt/kokoro/config.json` and is read once at
+startup, so editing it needs a `sudo systemctl restart kokoro-tts`. Keep it
+readable by the service user only if you care who can change how citations are
+expanded. If the file is missing or malformed the server still starts and falls
+back to its built-in defaults, so a bad edit degrades the formatter rather than
+taking the API down.
 
 ### Do not copy `.venv/`
 

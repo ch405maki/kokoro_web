@@ -309,6 +309,24 @@ def main() -> int:
     status, _, raw = get("/openapi.json")
     check("GET /openapi.json is valid", status == 200 and "paths" in json.loads(raw))
 
+    # ------------------------------------------------------- POST /preprocess
+    print("\n[preprocess]")
+    status, _, raw = post_json("/preprocess", {"text": "Certiorari1  [1]\nG.R. No. 64100"})
+    check("POST /preprocess returns 200", status == 200, f"got {status}")
+    out = json.loads(raw)
+    check("strips the footnote digit", "Certiorari1" not in out.get("text", ""), repr(out.get("text")))
+    check("strips the bracketed reference", "[1]" not in out.get("text", ""))
+    check("expands the citation marker", "G.R. Number 64100" in out.get("text", ""), repr(out.get("text")))
+    check("reports changed=true", out.get("changed") is True)
+    status, _, raw = post_json("/preprocess", {"text": "The court ruled. Judgment is final."})
+    check("idempotent on already-clean text",
+          json.loads(raw).get("changed") is False, repr(json.loads(raw).get("text")))
+    status, _, raw = post_json("/preprocess", {"text": "He said \"USD 50,000.00\" only."})
+    check("leaves quoted text intact",
+          '"USD 50,000.00"' in json.loads(raw).get("text", ""), repr(json.loads(raw).get("text")))
+    status, _, raw = post_json("/preprocess", {"text": ""})
+    check("accepts empty input", status == 200 and json.loads(raw).get("text") == "")
+
     # -------------------------------------------------------------- summary
     print("\n" + "-" * 52)
     if failed:

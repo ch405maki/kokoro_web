@@ -1,0 +1,80 @@
+{
+  "_comment": "Editable mappings for app/legal_preprocessor.py. Delete any key to fall back to the built-in default; add a key to override it. Loaded once at startup with json.load(), and a missing or malformed file is non-fatal - the module falls back to the defaults compiled into it.",
+
+  "abbreviations": {
+    "G.R. No.": "G.R. Number",
+    "G.R. Nos.": "G.R. Numbers",
+    "CA-G.R. SP No.": "CA-G.R. SP Number",
+    "NLRC LAC No.": "NLRC LAC Number",
+    "NLRC NCR Case No.": "NLRC NCR Case Number",
+    "No.": "Number",
+    "Nos.": "Numbers",
+    "RTC": "Regional Trial Court",
+    "CA": "Court of Appeals",
+    "NLRC": "National Labor Relations Commission",
+    "LA": "labor arbiter",
+    "POEA-SEC": "POEA Standard Employment Contract",
+    "POEA": "Philippines Overseas Employment Administration",
+    "OSG": "Office of the Solicitor General",
+    "LRC": "Land Registration Court",
+    "LRA": "Land Registration Authority",
+    "OCT": "Original Certificate of Title",
+    "TCT": "Transfer Certificate of Title",
+    "GLRO": "General Land Registration Office",
+    "AMOSUP": "Associated Marine Officers' and Seamen's Union of the Philippines",
+    "AFP": "Armed Forces of the Philippines",
+    "NCR": "National Capital Region",
+    "RAB": "Regional Arbitration Branch",
+    "VAC": "Voluntary Arbitration Case",
+
+    "_caution": "The next group came from a clinical/general corpus, not from Philippine case law. They are inert on legal text in most cases but will fire on the words below, so delete the ones you do not want. CT, ILO and CBA in particular are common enough in unrelated writing to misfire.",
+    "ILO": "International Labour Organization",
+    "CBA": "collective bargaining agreement",
+    "CT": "computed tomography",
+    "NSAIDs": "nonsteroidal anti-inflammatory drugs",
+    "HR": "Human Resources",
+    "CCTV": "closed-circuit television",
+    "SeNA": "single-entry approach",
+
+    "_caution_2": "These are corporate names. They expand only as standalone words, so they are usually safe, but they will rewrite a party name that happens to appear alone on a line - set the value to the key itself to neutralise one.",
+    "MMI": "Multinational Maritime, Inc.",
+    "MMS": "MMS. Co., Ltd.",
+    "AJSU": "All Japan Seamen's Union",
+    "NSC": "National Steel Corporation"
+  },
+
+  "currency_map": {
+    "USD": "United States Dollars",
+    "PHP": "Pesos"
+  },
+
+  "currency_aliases": {
+    "_comment": "How amounts are written in practice. Philippine decisions almost never say 'PHP' - they write 'P' or the peso sign - so without these aliases the currency pass misses nearly every real amount. The digit string that follows is what gets spelled out.",
+    "PHP": "PHP",
+    "USD": "USD",
+    "P": "PHP",
+    "US$": "USD",
+    "$": "USD",
+    "₱": "PHP"
+  },
+
+  "cent_subunit": {
+    "PHP": "Centavos",
+    "USD": "Cents"
+  },
+
+  "ocr_map": {
+    "_comment": "Digit-for-letter confusions from the scanner, matched on word boundaries only. The spec named 1s and prope1iies; th1s, 1t and wa1s are added because they are the most frequent equivalents in scanned opinions and cost nothing. Add your own here.",
+    "prope1iies": "properties",
+    "th1s": "this",
+    "1s": "is",
+    "1t": "it",
+    "wa1s": "was"
+  },
+
+  "editorial_markers": [
+    "Emphasis in the original",
+    "Emphasis supplied",
+    "Citations omitted"
+  ]
+}

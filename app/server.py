@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import engine as E
+from . import legal_preprocessor as LP
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -101,6 +102,15 @@ class SpeakMeta(BaseModel):
     speed: float
 
 
+class PreprocessRequest(BaseModel):
+    text: str = Field("", description="Raw text pasted from a legal document.")
+
+
+class PreprocessResponse(BaseModel):
+    text: str = Field(..., description="Cleaned text, ready for TTS.")
+    changed: bool = Field(..., description="False when the input was already clean.")
+
+
 # ------------------------------------------------------------------- routes
 
 @app.get("/health")
@@ -134,6 +144,24 @@ def voices(lang: str | None = Query(None, max_length=4, description="Locale pref
 def warmup() -> dict:
     """Pre-load the model so the first real request is not slow."""
     return E.get_engine().warm_up()
+
+
+@app.post("/preprocess")
+def preprocess(req: PreprocessRequest) -> PreprocessResponse:
+    """Clean legal document text for TTS.
+
+    Strips footnote references and editorial apparatus, repairs OCR damage,
+    expands configured legal abbreviations, spells out currency and
+    percentages, and normalises whitespace. Quoted passages are left intact.
+    Mappings come from config.json, loaded once at startup.
+    """
+    cleaned = LP.preprocess_legal_text(req.text)
+    # Compare without the surrounding whitespace: the pipeline always ends the
+    # document with a single newline, so a raw comparison would report
+    # "changed" even for text that was already perfectly clean.
+    return PreprocessResponse(
+        text=cleaned, changed=cleaned.strip() != req.text.strip()
+    )
 
 
 @app.post("/speak", response_class=Response)
@@ -276,6 +304,9 @@ def index() -> HTMLResponse:
 @app.on_event("startup")
 def _startup() -> None:
     E.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    # Parse config.json now rather than on the first request, so a malformed
+    # file is reported at boot instead of failing silently mid-session.
+    LP.load_config(reload=True)
 
 
 # ------------------------------------------------------------------ helpers

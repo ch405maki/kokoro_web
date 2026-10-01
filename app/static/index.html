@@ -163,9 +163,18 @@
      above the download icon and the progress spinner. Style icons per-context. */
   .btn i { font-size: 17px; }
   .btn.big { width: 100%; padding: 12px 18px; font-size: 15px; }
+  /* Compact variant for the inline toolbar actions, e.g. Auto-Format. */
+  .btn.sm { padding: 6px 11px; font-size: 12.5px; gap: 6px; border-radius: var(--radius-sm); }
+  .btn.sm i { font-size: 14px; }
+  .btn.busy i { animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   /* Spans the player card so the icon and its label share a single row. */
   .btn.full { width: 100%; }
   .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  /* ---------- legal preprocessor ---------- */
+  /* Label, live count and the Auto-Format control share the header row. */
+  .head-actions { display: flex; align-items: center; gap: 10px; }
 
   /* ---------- player ---------- */
   .player {
@@ -301,11 +310,16 @@
       <fieldset class="grow">
         <div class="text-head">
           <label class="label" for="text">Text to speak</label>
-          <span class="count" id="charCount">0 characters</span>
+          <span class="head-actions">
+            <span class="count" id="charCount">0 characters</span>
+            <button class="btn ghost sm" id="autoformat" type="button" title="Clean footnote markers, OCR damage, legal abbreviations and amounts">
+              <i class="ph ph-magic-wand" aria-hidden="true"></i> <span>Auto-Format</span>
+            </button>
+          </span>
         </div>
         <textarea id="text" spellcheck="true" placeholder="Type or paste the text you want spoken here."></textarea>
-        <p class="help">
-          Text is auto-formatted to title case as you type or paste. Blank lines split it into separate chunks. Start a word with <code>/</code> to insert a short pause.
+        <p class="help" id="preHelp">
+          Pasted text is auto-formatted: footnote markers removed, OCR damage repaired, legal abbreviations expanded, amounts spelled out. Blank lines split it into separate chunks. Start a word with <code>/</code> to insert a short pause.
         </p>
       </fieldset>
     </div>
@@ -465,6 +479,70 @@
       $("gapVal").textContent = Math.round(Number(e.target.value) * 1000) + " ms";
     });
 
+  // ---------- legal preprocessing ----------
+  // There is one text area. Auto-Format rewrites what is already in it rather
+  // than producing a second copy, so there is nothing to keep in sync and
+  // nothing to review but the text that will actually be spoken. It runs on
+  // paste, and again before Generate if the text has been edited since.
+  var preState = { running: false, formatted: "" };
+
+  function needsFormat() {
+    var value = $("text").value;
+    return value.trim().length > 0 && value !== preState.formatted;
+  }
+
+  function setPreHelp(msg) {
+    $("preHelp").innerHTML = msg;
+  }
+
+  var DEFAULT_HELP = $("preHelp").innerHTML;
+
+  function setFormatBusy(on) {
+    preState.running = on;
+    var btn = $("autoformat");
+    btn.disabled = on;
+    btn.classList.toggle("busy", on);
+    // Never re-enable Generate while a synthesis is already running, which can
+    // happen when a paste-triggered format finishes mid-request.
+    $("speak").disabled = on || state.busy;
+  }
+
+  function formatText() {
+    var raw = $("text").value;
+    if (!raw.trim()) return Promise.resolve("");
+    $("banner").classList.remove("show");
+    setFormatBusy(true);
+    return fetch("/preprocess", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: raw })
+    })
+      .then(readJSON)
+      .then(function (j) {
+        // Assigning .value does not fire "input", so the title-case pass is not
+        // re-entered here and the formatter cannot recurse into itself.
+        $("text").value = j.text || "";
+        preState.formatted = $("text").value;
+        showCount(false);
+        if (j.changed) {
+          setPreHelp("Auto-formatted for speech: footnote markers removed, OCR damage " +
+            "repaired, legal abbreviations expanded, amounts spelled out. Quoted " +
+            "passages are left as written.");
+        } else {
+          setPreHelp(DEFAULT_HELP);
+        }
+        return preState.formatted;
+      })
+      .finally(function () { setFormatBusy(false); });
+  }
+
+  $("autoformat").addEventListener("click", function () {
+    formatText().catch(function (e) {
+      fail("Auto-Format failed: " + String(e.message || e).replace(/</g, "&lt;"));
+      $("dot").dataset.state = "error";
+    });
+  });
+
   // Ctrl/Cmd+Enter submits
   $("text").addEventListener("keydown", function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); generate(); }
@@ -532,11 +610,24 @@
       countReset = setTimeout(function () { $("charCount").classList.remove("pasted"); }, 1400);
     }
   }
-  $("text").addEventListener("input", function () { applyTitleCase(); showCount(false); });
+  $("text").addEventListener("input", function () {
+    applyTitleCase(); showCount(false);
+  });
   $("text").addEventListener("paste", function () {
-    // The paste event precedes the insertion, so normalise and read the count
-    // once the browser has committed the text on the next frame.
-    requestAnimationFrame(function () { applyTitleCase(); showCount(true); });
+    // The paste event precedes the insertion, so normalise, read the count and
+    // run the formatter once the browser has committed the text on the next
+    // frame. Pasting a decision is the main way this app is fed, so it should
+    // arrive already fit to speak.
+    requestAnimationFrame(function () {
+      applyTitleCase(); showCount(true);
+      if (needsFormat()) {
+        formatText().catch(function (e) {
+          // A failed format must not lose the pasted text; leave it as typed.
+          setPreHelp("Auto-Format could not run: " +
+            String(e.message || e).replace(/</g, "&lt;"));
+        });
+      }
+    });
   });
   showCount(false);
 
@@ -624,7 +715,22 @@
   }
 
   function generate() {
-    if (state.busy) return;
+    if (state.busy || preState.running) return;
+    if (!$("text").value.trim()) { fail("Enter some text first."); $("text").focus(); return; }
+
+    // Formatting is a fast text pass, so it runs before synthesis rather than
+    // after: the user clicks Generate once and the audio is built from text
+    // that has already been cleaned. If it was cleaned by the paste, this is a
+    // no-op.
+    var ready = needsFormat() ? formatText() : Promise.resolve($("text").value.trim());
+    ready.then(function () { speak(); })
+      .catch(function (e) {
+        fail("Auto-Format failed: " + String(e.message || e).replace(/</g, "&lt;"));
+        $("dot").dataset.state = "error";
+      });
+  }
+
+  function speak() {
     var text = $("text").value.trim();
     if (!text) { fail("Enter some text first."); $("text").focus(); return; }
 
