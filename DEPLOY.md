@@ -41,7 +41,7 @@ From your Windows machine, excluding the Windows virtual environment:
 # from the Kokoro folder on your PC
 scp -r `
   app deploy tests `
-  DEPLOY.md README.md pyproject.toml .gitignore config.json `
+  DEPLOY.md README.md pyproject.toml .gitignore config.json legal_preprocessor.py `
   user@SERVER_IP:kokoro-staging/
 ```
 
@@ -63,7 +63,7 @@ too, and the installer will refresh it idempotently:
 
 ```bash
 sudo mkdir -p /opt/kokoro
-sudo cp -a app deploy tests README.md DEPLOY.md pyproject.toml config.json /opt/kokoro/
+sudo cp -a app deploy tests README.md DEPLOY.md pyproject.toml config.json legal_preprocessor.py /opt/kokoro/
 cd /opt/kokoro && sudo bash deploy/install-centos.sh
 ```
 

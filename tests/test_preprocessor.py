@@ -1,4 +1,4 @@
-"""Tests for app.legal_preprocessor.
+"""Tests for legal_preprocessor.
 
 Run with:
 
@@ -19,8 +19,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import legal_preprocessor as lp  # noqa: E402
-from app.legal_preprocessor import number_to_words, preprocess_legal_text  # noqa: E402
+import legal_preprocessor as lp  # noqa: E402
+from legal_preprocessor import number_to_words, preprocess_legal_text  # noqa: E402
 
 
 def clean(text: str) -> str:

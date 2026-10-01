@@ -15,8 +15,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import legal_preprocessor as LP
+
 from . import engine as E
-from . import legal_preprocessor as LP
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 

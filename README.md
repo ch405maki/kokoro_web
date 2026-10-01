@@ -595,8 +595,8 @@ app/
   engine.py           model loading, synthesis, voice catalog, wav/mp3 encoding
   server.py           FastAPI app: /speak /preprocess /voices /health /warmup /docs
   cli.py              argparse CLI
-  legal_preprocessor.py  legal-text cleaner behind /preprocess
   static/index.html   web UI, self-contained, no build step
+legal_preprocessor.py  legal-text cleaner behind /preprocess
 tests/
   test_api.py         64-check end-to-end suite
   test_preprocessor.py  39-test preprocessor suite (unittest, no server needed)
