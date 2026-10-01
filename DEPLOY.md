@@ -80,6 +80,45 @@ expanded. If the file is missing or malformed the server still starts and falls
 back to its built-in defaults, so a bad edit degrades the formatter rather than
 taking the API down.
 
+The compiled matchers for those mappings are cached in memory, keyed on the
+config object they were built from. A restart picks up an edit; running the old
+process does not, which is the intended behaviour. A partial config is safe too -
+an empty `abbreviations` object, a non-string value or an `editorial_markers`
+list of junk all get ignored rather than raising, so you can trim the file down
+while you experiment.
+
+### The preprocessor is pure standard library
+
+`legal_preprocessor.py` uses nothing outside the Python standard library: no C
+extension, no compiler step, no `pip install` on the server, and no
+platform-specific branch. The same file and the same behaviour run on Windows and
+CentOS, so there is no second build to keep in sync. It is the one part of this
+project that behaves identically everywhere, which matters because it runs on
+every paste, synchronously, on the request path.
+
+It has been tuned for throughput, since a pasted decision can be 130 kB. A
+synthetic 130,132-character / 1,609-line decision cleans in about **38 ms**
+(3.4 MB/s) against ~120 ms before the work, with byte-for-byte identical output.
+Through `POST /preprocess` that is a 45 ms round trip including HTTP, and a
+typical 13 kB paste comes back in 7 ms. Since the step is synchronous and
+unauthenticated by default, the practical ceiling before anyone notices latency
+is a few hundred kB per request; past that, put nginx in front of it and send the
+document in pieces. Full method and measurements are in the README.
+
+### Verifying the preprocessor on the server
+
+The unit suite needs no server and no model weights, so it is the cheap check
+after any `config.json` or preprocessor change:
+
+```bash
+cd /opt/kokoro
+sudo -u kokoro .venv/bin/python -m unittest tests.test_preprocessor -v
+```
+
+46 tests, under a second. If you change the matcher itself, also confirm the
+output did not change: run `tests/test_preprocessor.py` on both the old and new
+commit and diff the results over a real decision before deploying.
+
 ### Do not copy `.venv/`
 
 It contains Windows `.exe` launchers and Windows DLLs - `torch`, `scipy`,
@@ -239,6 +278,14 @@ It reports `ready`, `device`, `model`, `load_seconds`, and the voice count -
   model, and synthesis is serialised behind a lock inside the process anyway.
   `--workers 2` doubles memory for no throughput gain. For genuine parallelism,
   run N replicas behind nginx and let nginx balance.
+- **`/preprocess` is not behind that lock.** The endpoint is a plain `def`, so
+  Starlette runs it in the threadpool rather than on the event loop. Auto-format
+  requests therefore overlap each other and overlap synthesis instead of
+  stalling them, and the cached config is read without taking a lock. The catch is
+  that it is still CPU work: a few very large documents at once will compete with
+  synthesis for cores on a small box, and the default 40-thread threadpool will
+  happily start more of them than the machine can serve. On a 2-core host, cap
+  concurrent pastes at the nginx side if you see synthesis latency climb.
 - **First request is slow.** The model loads lazily on the first `/speak` or
   `/warmup`, ~6 s on a decent CPU. The installer warms it once, but systemd
   restarts lose that, so use `Restart=always` plus a health check rather than

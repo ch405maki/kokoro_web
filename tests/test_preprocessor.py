@@ -88,6 +88,80 @@ class TestOcrFixes(unittest.TestCase):
     def test_excess_whitespace_is_collapsed(self):
         self.assertEqual(clean("a     b"), "a b")
 
+    def test_fixes_glued_to_a_digit_are_still_repaired(self):
+        # The scanner drops corrections straight after a number, so an OCR fix
+        # must still apply when a digit sits next to it. Only letters block a
+        # match; tightening the boundary to digits would silently miss these.
+        self.assertEqual(clean("$1,234.56wa1s"), "One Thousand Two Hundred "
+                         "Thirty-Four United States Dollars and Fifty-Six Centswas")
+        self.assertEqual(clean("Nos.91t"), "Nos.9it")
+        self.assertEqual(clean("5th1s"), "5this")
+
+    def test_a_replacement_is_not_rescanned(self):
+        # "properties" contains no other key, but the fix text must never be fed
+        # back through the matcher, or a fix could rewrite its own output.
+        self.assertEqual(clean("prope1iies prope1iies"), "properties properties")
+
+
+class TestLiteralMatcherInternals(unittest.TestCase):
+    """The single-pass literal matcher underpins steps A, B and C."""
+
+    def test_longest_key_wins_regardless_of_input_order(self):
+        pairs = [("NLRC LAC No.", "combined"), ("NLRC", "bare"), ("LAC", "lac")]
+        for order in (pairs, list(reversed(pairs)), [pairs[1], pairs[2], pairs[0]]):
+            with self.subTest(order=order):
+                matcher = lp._LiteralMatcher(order, lp._abbrev_branch)
+                self.assertEqual(matcher.sub("NLRC LAC No. and NLRC"),
+                                 "combined and bare")
+
+    def test_lookbehind_sees_the_character_before_the_start_offset(self):
+        # The matcher hands pattern.match an offset, which must not stop a
+        # lookbehind from inspecting what came before the match.
+        matcher = lp._LiteralMatcher([("CA", "court")], lp._abbrev_branch)
+        # A bare "CA" never swallows the "CA-" of "CA-G.R.", so only the
+        # standalone one is replaced.
+        self.assertEqual(matcher.sub("CA-G.R. CA"), "CA-G.R. court")
+        self.assertEqual(matcher.sub("xCA ruled"), "xCA ruled")
+        self.assertEqual(matcher.sub("a CA"), "a court")
+
+    def test_case_insensitive_matcher_handles_mixed_case_keys(self):
+        matcher = lp._LiteralMatcher(
+            [("Emphasis supplied", "")], lp._editorial_branch,
+            ignore_case=True, triggers="[(",
+        )
+        self.assertEqual(matcher.sub("a [Emphasis Supplied]. b"), "a  b")
+        self.assertEqual(matcher.sub("(EMPHASIS SUPPLIED, omitted) b"), "b")
+
+    def test_empty_matcher_is_a_no_op(self):
+        matcher = lp._LiteralMatcher([], lp._abbrev_branch)
+        self.assertTrue(matcher.empty)
+        self.assertEqual(matcher.sub("untouched"), "untouched")
+
+    def test_matcher_cache_follows_a_config_reload(self):
+        # The compiled matchers are cached against the exact mapping object they
+        # were built from, so a reload has to invalidate them. Getting this wrong
+        # would keep serving the old config until the process restarted.
+        with tempfile.TemporaryDirectory() as tmp:
+            replacement = Path(tmp) / "config.json"
+            replacement.write_text(json.dumps({
+                "abbreviations": {"ZZZ": "Zebra"},
+                "editorial_markers": ["Custom marker"],
+            }), encoding="utf-8")
+
+            try:
+                with mock.patch.object(lp, "_config_candidates",
+                                       return_value=[replacement]):
+                    lp.load_config(reload=True)
+                    self.assertEqual(clean("a ZZZ appears"), "a Zebra appears")
+                    self.assertEqual(clean("[Custom marker] gone"), "gone")
+            finally:
+                lp.load_config(reload=True)
+
+        # And the real config is back in force.
+        self.assertEqual(clean("a ZZZ appears"), "a ZZZ appears")
+        self.assertEqual(clean("G.R. No. 5"), "G.R. Number 5")
+        self.assertEqual(clean("[Emphasis supplied] x"), "x")
+
 
 class TestAbbreviations(unittest.TestCase):
     """Step C - configured standalone abbreviations."""
