@@ -151,10 +151,11 @@ def warmup() -> dict:
 def preprocess(req: PreprocessRequest) -> PreprocessResponse:
     """Clean legal document text for TTS.
 
-    Strips footnote references and editorial apparatus, repairs OCR damage,
-    expands configured legal abbreviations, spells out currency and
-    percentages, and normalises whitespace. Quoted passages are left intact.
-    Mappings come from config.json, loaded once at startup.
+    Strips stray OCR markers, footnote references and editorial apparatus,
+    repairs OCR damage, drops parenthetical abbreviations, expands standalone
+    abbreviations and suffixes, spells out currency and percentages, and
+    normalises whitespace. Quoted passages are left intact. Mappings and the
+    per-pass formatting_flags come from config.json, loaded once at startup.
     """
     cleaned = LP.preprocess_legal_text(req.text)
     # Compare without the surrounding whitespace: the pipeline always ends the

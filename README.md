@@ -203,26 +203,47 @@ text. It also runs again before **Generate speech** if you have edited the text
 since, which means the audio is always built from cleaned text. **Auto-Format**
 next to the character count re-runs it on demand.
 
-It is a text pass, not a model call, so it is effectively instant. It does five
+It is a text pass, not a model call, so it is effectively instant. It does nine
 things, in order:
 
 | Step | What it does | Example |
 |---|---|---|
-| A | Drops footnote references and editorial apparatus | `Certiorari1`, `respondents.2`, `[1]`, `[sic]`, `[a.f.]`, `(awÞhi`, `(Emphasis supplied)` |
-| B | Repairs OCR damage and collapses runs of spaces | `prope1iies` → `properties`, `1s` → `is`, `[j]ust` → `just` |
-| C | Expands configured legal abbreviations | `G.R. No.` → `G.R. Number`, `CA` → `Court of Appeals` |
-| D | Spells out currency and percentages | `PHP 91,575.65` → `Ninety-One Thousand Five Hundred Seventy-Five Pesos and Sixty-Five Centavos`, `10%` → `ten percent` |
-| E | Normalises whitespace and punctuation | blank-line runs collapse, single space after `,` `:` `;` |
+| 1 | Drops stray OCR markers | `(awÞhi(`, `[sic]`, `[a.f.]`, `[s]`, `[R]` |
+| 2 | Repairs OCR damage and collapses runs of spaces | `prope1iies` → `properties`, `1s` → `is`, `[j]ust` → `just` |
+| 3 | Removes editorial markers | `(Emphasis supplied)`, `(Citations omitted)` |
+| 4 | Drops a redundant parenthetical (a configured pair, a repeated token, or the initials of what precedes it) | `Court of Appeals (CA)` → `Court of Appeals`, `Juadines (Juadines)` → `Juadines` |
+| 5 | Expands remaining standalone abbreviations | `CA` → `Court of Appeals`, `G.R. No.` → `G.R. Number` |
+| 6 | Expands corporate and honorific suffixes | `Inc.` → `Incorporated`, `Capt.` → `Captain` |
+| 7 | Spells out currency amounts | `PHP 91,575.65` → `Ninety-One Thousand Five Hundred Seventy-Five Pesos and Sixty-Five Centavos` |
+| 8 | Spells out percentages | `10%` → `ten percent` |
+| 9 | Normalises whitespace and punctuation | blank-line runs collapse, single space after `,` `:` `;` |
 
-Two deliberate limits: a `No.` is only read as a citation marker when a number
-follows, so `No person shall...` is untouched, and text inside `>` blockquotes or
+For the configured pairs, steps 4 and 5 run as one left-to-right scan, longest
+key first, so a stripped full form is never re-expanded and no duplicate is
+produced: `Court of Appeals (CA)` becomes `Court of Appeals`, and `POEA Standard
+Employment Contract (POEA-SEC)` is not rewritten into a phrase containing the
+abbreviation it just lost. Step 4 also covers the party names the config cannot
+enumerate: a parenthetical is dropped when it provably repeats the words before
+it - a token already present (`Jaime C. Juadines (Juadines)`) or the initials of
+a contiguous run of the preceding capitalised words (`The Supreme Court (SC)`,
+`Court of Appeals (Ca)`). An unrelated short form (`Agency, Inc. (Arsia)`) and
+role tags (`(petitioner)`) are deliberately left alone. After the abbreviations,
+corporate and honorific suffixes are expanded in a second pass.
+
+Three deliberate limits: a `No.` is only read as a citation marker when a number
+follows, so `No person shall...` is untouched; text inside `>` blockquotes or
 double quotes is reproduced byte for byte, because a quoted passage is often
-being read aloud as written.
+being read aloud as written; and a single bracketed letter (`[j]ust`) is a drop
+cap to repair rather than a stray marker to delete.
 
 Mappings live in `config.json` at the repo root, so you can retune them without
 touching the code. It is parsed once at startup; if it is missing or malformed
 the built-in defaults are used and the server still starts. Add a `"_comment"`
-key alongside any entry and it is ignored by the matcher.
+key alongside any entry and it is ignored by the matcher. Each optional pass can
+be switched off individually through the `formatting_flags` section - for
+example `"spell_out_percentages": false` leaves `10%` as it is - and
+`strip_name_parentheticals` (off by default) removes parentheticals that look
+like personal names.
 
 #### How fast it is
 
@@ -236,9 +257,9 @@ decision, best of seven runs after warm-up:
 | `POST /preprocess` round trip | — | 45 ms | incl. HTTP |
 | a 13 kB paste | — | 7 ms | |
 
-The output is byte-for-byte identical to the previous implementation. That was
-verified by a differential harness that ran the committed version and the
-optimized one side by side over 4,195 cases — every configured key in several
+That optimization was byte-for-byte behaviour-preserving. It was verified by a
+differential harness that ran the committed version and the optimized one side
+by side over 4,195 cases — every configured key in several
 contexts, shuffled and prefix-colliding keys, all OCR fixes and editorial
 markers, the 44 specification examples, and 3,000 randomized adversarial
 strings built from the real config keys. Zero mismatches, and that check is
@@ -456,7 +477,7 @@ Or call the module directly, which is what the batch file wraps:
 run_server.bat                                # terminal 1
 .venv\Scripts\python.exe tests\test_api.py   # terminal 2
 
-# preprocessor suite: 46 tests, no server needed
+# preprocessor suite: 75 tests, no server needed
 .venv\Scripts\python.exe -m unittest tests.test_preprocessor -v
 
 # throughput table
@@ -473,7 +494,7 @@ Set `PYTHONIOENCODING=utf-8` first. The console defaults to cp1252 on Windows an
 the suite prints IPA, and will die with `UnicodeEncodeError` partway through
 otherwise.
 
-Latest run on this machine: **64/64 API checks and 46/46 preprocessor tests
+Latest run on this machine: **64/64 API checks and 75/75 preprocessor tests
 passed.** The API suite covers every endpoint, speed and voice differentiation,
 WAV header parsing, chunk splitting, MP3 encoding, path-traversal rejection, the
 unavailable-language-pack path, and `POST /preprocess`. It
@@ -650,7 +671,7 @@ app/
 legal_preprocessor.py  legal-text cleaner behind /preprocess
 tests/
   test_api.py         64-check end-to-end suite
-  test_preprocessor.py  46-test preprocessor suite (unittest, no server needed)
+  test_preprocessor.py  75-test preprocessor suite (unittest, no server needed)
   bench.py            throughput benchmark
 config.json           abbreviation / OCR / currency mappings for the preprocessor
 output/               generated audio (gitignored)

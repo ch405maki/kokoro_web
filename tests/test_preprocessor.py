@@ -194,6 +194,12 @@ class TestAbbreviations(unittest.TestCase):
         self.assertEqual(clean("NLRC LAC No. 5"), "NLRC LAC Number 5")
         self.assertEqual(clean("NLRC NCR Case No. 9"), "NLRC NCR Case Number 9")
 
+    def test_new_citation_markers_and_statutes(self):
+        self.assertEqual(clean("CA-G.R. CV No. 12345"), "CA-G.R. CV Number 12345")
+        self.assertEqual(clean("NLRC RAB Case No. 7"), "NLRC RAB Case Number 7")
+        self.assertEqual(clean("NLRC Case No. 9"), "NLRC Case Number 9")
+        self.assertEqual(clean("RA 8042 and PD 442"), "Republic Act 8042 and Presidential Decree 442")
+
     def test_abbr_period_does_not_gain_a_space(self):
         # Regression: the spacing pass turned "G.R. Number" into "G. R. Number".
         self.assertEqual(clean("G.R. No. 64100"), "G.R. Number 64100")
@@ -228,6 +234,11 @@ class TestNumbers(unittest.TestCase):
             clean("PHP 91,575.65"),
             "Ninety-One Thousand Five Hundred Seventy-Five Pesos and Sixty-Five Centavos",
         )
+
+    def test_php_spelling_variants(self):
+        # config.json lists Php and PhP as aliases of PHP.
+        self.assertEqual(clean("Php 1,000.00"), "One Thousand Pesos")
+        self.assertEqual(clean("PhP 2,000.00"), "Two Thousand Pesos")
 
     def test_amounts_keep_their_grouping_and_cents(self):
         # Regression: the footnote rule used to delete ",000.00" from a price
@@ -373,6 +384,242 @@ class TestPipelineBehaviour(unittest.TestCase):
         self.assertNotIn("[1]", out)
         self.assertNotIn("Certiorari1", out)
         self.assertNotIn("  ", out)
+
+
+class TestStrayMarkers(unittest.TestCase):
+    """Step 1 - config-driven removal of OCR junk and bracketed apparatus."""
+
+    def test_bracketed_drop_caps_are_repaired_not_amputated(self):
+        # A single bracketed letter is a drop cap when a word follows, so the
+        # stray-marker pass must leave it for the step B bracket repair.
+        self.assertEqual(
+            clean("[R]espondent [S]antos [i]n [j]ust [t]ime"),
+            "Respondent Santos in just time",
+        )
+
+    def test_lone_single_letter_brackets_are_removed(self):
+        self.assertEqual(clean("a [R] [S] [i] [j] [t] alone"), "a alone")
+
+    def test_markers_are_loaded_from_config(self):
+        markers = lp.load_config()["stray_markers"]
+        for key in (r"\[sic\]", r"\[a\.f\.\]", r"\[R\]", r"\[S\]"):
+            self.assertIn(key, markers)
+
+
+class TestParentheticalStrip(unittest.TestCase):
+    """Step 4 - drop a parenthetical that repeats its own full form."""
+
+    def test_full_form_is_kept_and_parenthetical_dropped(self):
+        self.assertEqual(
+            clean("The Court of Appeals (CA) ruled."), "The Court of Appeals ruled."
+        )
+        self.assertEqual(
+            clean("The National Labor Relations Commission (NLRC) held."),
+            "The National Labor Relations Commission held.",
+        )
+        self.assertEqual(
+            clean("The Regional Trial Court (RTC) acted."),
+            "The Regional Trial Court acted.",
+        )
+
+    def test_stripping_then_expanding_creates_no_duplicate(self):
+        # The regression this whole design exists to prevent: stripping and
+        # abbreviation expansion share one scan, so the full form is never
+        # pasted back on top of itself.
+        self.assertEqual(
+            clean("Court of Appeals (CA) and the CA ruled."),
+            "Court of Appeals and the Court of Appeals ruled.",
+        )
+        self.assertEqual(
+            clean("National Labor Relations Commission (NLRC) held; the NLRC affirmed."),
+            "National Labor Relations Commission held; the National Labor Relations "
+            "Commission affirmed.",
+        )
+
+    def test_a_stripped_full_form_is_not_re_expanded_internally(self):
+        # "POEA Standard Employment Contract" contains the abbreviation "POEA".
+        # If stripping and expansion were separate passes it would become
+        # "Philippines Overseas Employment Administration Standard Employment
+        # Contract".
+        self.assertEqual(
+            clean("POEA Standard Employment Contract (POEA-SEC) applies."),
+            "POEA Standard Employment Contract applies.",
+        )
+
+    def test_quoted_parentheticals_are_protected(self):
+        src = 'He said "Court of Appeals (CA)" today.'
+        self.assertEqual(clean(src), src)
+
+
+class TestRedundantParentheticals(unittest.TestCase):
+    """Step 4's generic half - party short forms the config cannot enumerate."""
+
+    def test_party_short_forms_are_stripped(self):
+        src = ("Court of Appeals (Ca), Agency, Inc. (Arsia) and Jaime C. Juadines "
+               "(Juadines) Declared Respondent Louiejie G. Bautista (Bautista)")
+        self.assertEqual(
+            clean(src),
+            "Court of Appeals, Agency, Incorporated (Arsia) and Jaime C. Juadines "
+            "Declared Respondent Louiejie G. Bautista",
+        )
+
+    def test_initials_of_the_preceding_words(self):
+        # Capitalised words may be preceded by a leading "The" or by another
+        # entity; the letters just have to match a contiguous run.
+        self.assertEqual(clean("The Supreme Court (SC) ruled."), "The Supreme Court ruled.")
+        self.assertEqual(
+            clean("Metro Manila (MM) and Republic of the Philippines (RP)."),
+            "Metro Manila and Republic of the Philippines.",
+        )
+        self.assertEqual(clean("Court of Appeals (Ca) ruled."), "Court of Appeals ruled.")
+
+    def test_a_repeated_token_is_stripped(self):
+        self.assertEqual(clean("Rule 65 (Rule) applies."), "Rule 65 applies.")
+
+    def test_an_unrelated_short_form_is_kept(self):
+        # "Arsia" is neither a repeat nor the initials of "Agency, Inc.", so it
+        # must survive - dropping it would need a rule the user did not want.
+        self.assertEqual(
+            clean("Agency, Inc. (Arsia) filed."),
+            "Agency, Incorporated (Arsia) filed.",
+        )
+        self.assertEqual(clean("Cruz (Chan) appeared."), "Cruz (Chan) appeared.")
+
+    def test_role_tags_are_kept(self):
+        src = "Pedro Cruz (petitioner) and Ana Cruz (respondent) appeared."
+        self.assertEqual(clean(src), src)
+
+    def test_quoted_repeats_are_protected(self):
+        src = 'He said "Cruz (Cruz)" today.'
+        self.assertEqual(clean(src), src)
+
+    def test_bracketed_citations_are_not_touched(self):
+        self.assertEqual(clean("G.R. No. 64100 (2019)"), "G.R. Number 64100 (2019)")
+
+
+class TestSuffixExpansion(unittest.TestCase):
+    """Step 6 - corporate and honorific suffixes."""
+
+    def test_corporate_suffixes(self):
+        self.assertEqual(clean("Acme, Inc. filed."), "Acme, Incorporated filed.")
+        self.assertEqual(
+            clean("Acme Corp. and Acme Co. and Acme Ltd."),
+            "Acme Corporation and Acme Company and Acme Limited",
+        )
+
+    def test_honorifics(self):
+        self.assertEqual(
+            clean("Capt. Cruz and Atty. Reyes met."),
+            "Captain Cruz and Attorney Reyes met.",
+        )
+        self.assertEqual(
+            clean("Dela Cruz, Jr. and Dela Cruz, Sr."),
+            "Dela Cruz, Junior and Dela Cruz, Senior",
+        )
+
+    def test_legal_shorthand(self):
+        self.assertEqual(clean("Sec. 5 and Art. III"), "Section 5 and Article III")
+
+    def test_a_suffix_inside_an_abbreviation_value_is_expanded(self):
+        # MMI expands to "Multinational Maritime, Inc." and the suffix pass then
+        # finishes the job on the "Inc." that expansion produced.
+        self.assertEqual(
+            clean("MMI filed."), "Multinational Maritime, Incorporated filed."
+        )
+
+
+class TestFormattingFlags(unittest.TestCase):
+    """Every optional pass can be switched off through config.json."""
+
+    def _with_flags(self, flags: dict, text: str) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            replacement = Path(tmp) / "config.json"
+            replacement.write_text(
+                json.dumps({"formatting_flags": flags}), encoding="utf-8"
+            )
+            try:
+                with mock.patch.object(lp, "_config_candidates",
+                                       return_value=[replacement]):
+                    lp.load_config(reload=True)
+                    return clean(text)
+            finally:
+                lp.load_config(reload=True)
+
+    def test_parenthetical_strip_can_be_disabled(self):
+        # With stripping off, the standalone expansion still fires inside the
+        # brackets. That is the documented consequence of opting out.
+        self.assertEqual(
+            self._with_flags({"strip_parentheticals": False},
+                             "Court of Appeals (CA) ruled."),
+            "Court of Appeals (Court of Appeals) ruled.",
+        )
+
+    def test_percentages_can_be_disabled(self):
+        self.assertEqual(
+            self._with_flags({"spell_out_percentages": False}, "Award of 10%."),
+            "Award of 10%.",
+        )
+
+    def test_currency_can_be_disabled(self):
+        self.assertEqual(
+            self._with_flags({"spell_out_currencies": False}, "PHP 100.00"),
+            "PHP 100.00",
+        )
+
+    def test_honorifics_and_corporate_suffixes_toggle_independently(self):
+        self.assertEqual(
+            self._with_flags({"expand_honorifics": False},
+                             "Dela Cruz, Jr. and Acme, Inc."),
+            "Dela Cruz, Jr. and Acme, Incorporated",
+        )
+        self.assertEqual(
+            self._with_flags({"expand_corporate_suffixes": False},
+                             "Dela Cruz, Jr. and Acme, Inc."),
+            "Dela Cruz, Junior and Acme, Inc.",
+        )
+
+    def test_ocr_repair_can_be_disabled(self):
+        self.assertEqual(
+            self._with_flags({"fix_ocr_artifacts": False}, "prope1iies now"),
+            "prope1iies now",
+        )
+
+    def test_editorial_marker_removal_can_be_disabled(self):
+        self.assertEqual(
+            self._with_flags({"remove_editorial_markers": False},
+                             "(Emphasis supplied) x"),
+            "(Emphasis supplied) x",
+        )
+
+    def test_name_parenthetical_stripping_is_opt_in(self):
+        self.assertEqual(
+            clean("Juan Dela Cruz (Ramon Reyes) ruled."),
+            "Juan Dela Cruz (Ramon Reyes) ruled.",
+        )
+        self.assertEqual(
+            self._with_flags({"strip_name_parentheticals": True},
+                             "Juan Dela Cruz (Ramon Reyes) ruled."),
+            "Juan Dela Cruz ruled.",
+        )
+
+
+class TestConfigSections(unittest.TestCase):
+    """The new config sections ship with built-in defaults."""
+
+    def test_new_sections_are_present(self):
+        config = lp.load_config(reload=True)
+        for section in ("parenthetical_strip", "suffix_map", "stray_markers",
+                        "formatting_flags"):
+            self.assertIn(section, config)
+            self.assertIn(section, lp.DEFAULTS)
+        self.assertTrue(config["formatting_flags"]["strip_parentheticals"])
+        self.assertFalse(config["formatting_flags"]["strip_name_parentheticals"])
+
+    def test_combined_matcher_orders_full_form_before_abbreviation(self):
+        entries = lp._combined_entries(lp.load_config(reload=True))
+        matcher = lp._LiteralMatcher(entries=entries)
+        self.assertEqual(matcher.sub("Court of Appeals (CA)"), "Court of Appeals")
+        self.assertEqual(matcher.sub("the CA ruled"), "the Court of Appeals ruled")
 
 
 if __name__ == "__main__":

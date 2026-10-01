@@ -5,9 +5,13 @@ one" and "(emphasis in the original)" is read aloud, case citations arrive with
 no spaces after periods, and every peso amount is read as digits. This module
 normalises all of that before the text reaches Kokoro.
 
-The pipeline is five ordered steps, A through E, each of which runs only on the
+The pipeline is a sequence of ordered steps, each of which runs only on the
 *unprotected* parts of the input so that quoted material - block quotes marked
-with ``>`` and anything between double quotes - survives byte for byte.
+with ``>`` and anything between double quotes - survives byte for byte. Stray
+OCR markers and editorial apparatus are removed first, OCR damage is repaired,
+parenthetical abbreviations are then stripped and standalone abbreviations and
+suffixes expanded, amounts and percentages are spelled out, and whitespace is
+normalised last.
 
 Two ordering decisions are deliberate and worth knowing about:
 
@@ -48,8 +52,11 @@ DEFAULTS: dict[str, Any] = {
         "G.R. No.": "G.R. Number",
         "G.R. Nos.": "G.R. Numbers",
         "CA-G.R. SP No.": "CA-G.R. SP Number",
+        "CA-G.R. CV No.": "CA-G.R. CV Number",
         "NLRC LAC No.": "NLRC LAC Number",
         "NLRC NCR Case No.": "NLRC NCR Case Number",
+        "NLRC RAB Case No.": "NLRC RAB Case Number",
+        "NLRC Case No.": "NLRC Case Number",
         "No.": "Number",
         "Nos.": "Numbers",
         "RTC": "Regional Trial Court",
@@ -66,20 +73,69 @@ DEFAULTS: dict[str, Any] = {
         "GLRO": "General Land Registration Office",
         "AMOSUP": "Associated Marine Officers' and Seamen's Union of the Philippines",
         "AFP": "Armed Forces of the Philippines",
+        "NCR": "National Capital Region",
+        "RAB": "Regional Arbitration Branch",
+        "VAC": "Voluntary Arbitration Case",
+        "RA": "Republic Act",
+        "PD": "Presidential Decree",
         "ILO": "International Labour Organization",
         "CBA": "collective bargaining agreement",
         "CT": "computed tomography",
         "NSAIDs": "nonsteroidal anti-inflammatory drugs",
+        "HR": "Human Resources",
+        "CCTV": "closed-circuit television",
+        "SeNA": "single-entry approach",
         "MMI": "Multinational Maritime, Inc.",
         "MMS": "MMS. Co., Ltd.",
         "AJSU": "All Japan Seamen's Union",
         "NSC": "National Steel Corporation",
-        "HR": "Human Resources",
-        "CCTV": "closed-circuit television",
-        "SeNA": "single-entry approach",
-        "NCR": "National Capital Region",
-        "RAB": "Regional Arbitration Branch",
-        "VAC": "Voluntary Arbitration Case",
+    },
+    # Parentheticals that follow their own full form. Keys are *regular
+    # expressions*; values are the replacement. Stripped in the same
+    # left-to-right pass as the abbreviations, so "Court of Appeals (CA)" can
+    # never turn into "Court of Appeals Court of Appeals".
+    "parenthetical_strip": {
+        r"Court of Appeals \(CA\)": "Court of Appeals",
+        r"National Labor Relations Commission \(NLRC\)": "National Labor Relations Commission",
+        r"Regional Trial Court \(RTC\)": "Regional Trial Court",
+        r"Land Registration Court \(LRC\)": "Land Registration Court",
+        r"Land Registration Authority \(LRA\)": "Land Registration Authority",
+        r"Office of the Solicitor General \(OSG\)": "Office of the Solicitor General",
+        r"Philippines Overseas Employment Administration \(POEA\)": "Philippines Overseas Employment Administration",
+        r"POEA Standard Employment Contract \(POEA-SEC\)": "POEA Standard Employment Contract",
+        r"collective bargaining agreement \(CBA\)": "collective bargaining agreement",
+        r"Original Certificate of Title \(OCT\)": "Original Certificate of Title",
+        r"Transfer Certificate of Title \(TCT\)": "Transfer Certificate of Title",
+        r"computed tomography \(CT\)": "computed tomography",
+        r"Human Resources \(HR\)": "Human Resources",
+        r"closed-circuit television \(CCTV\)": "closed-circuit television",
+        r"Armed Forces of the Philippines \(AFP\)": "Armed Forces of the Philippines",
+        r"International Labour Organization \(ILO\)": "International Labour Organization",
+        r"Associated Marine Officers' and Seamen's Union of the Philippines \(AMOSUP\)": "Associated Marine Officers' and Seamen's Union of the Philippines",
+        r"National Capital Region \(NCR\)": "National Capital Region",
+        r"single-entry approach \(SeNA\)": "single-entry approach",
+        r"Regional Arbitration Branch \(RAB\)": "Regional Arbitration Branch",
+    },
+    # Corporate and honorific suffixes, expanded after the abbreviations. Keys
+    # ending in a period are matched with the abbreviation boundary rules.
+    "suffix_map": {
+        "Inc.": "Incorporated",
+        "Corp.": "Corporation",
+        "Co.": "Company",
+        "Ltd.": "Limited",
+        "Phils.": "Philippines",
+        "Jr.": "Junior",
+        "Sr.": "Senior",
+        "Atty.": "Attorney",
+        "Capt.": "Captain",
+        "Dr.": "Doctor",
+        "Hon.": "Honorable",
+        "St.": "Street",
+        "Brgy.": "Barangay",
+        "Sec.": "Section",
+        "Art.": "Article",
+        "J.": "Justice",
+        "JJ.": "Justices",
     },
     # Amounts. Keys are matched case-sensitively as a standalone token.
     "currency_map": {
@@ -90,26 +146,67 @@ DEFAULTS: dict[str, Any] = {
     # overwhelmingly use "P" or the peso sign, never "PHP", so without this the
     # currency pass would miss most real amounts.
     "currency_aliases": {
-        "P": "PHP",
         "PHP": "PHP",
         "USD": "USD",
+        "P": "PHP",
         "US$": "USD",
         "$": "USD",
         "₱": "PHP",
+        "Php": "PHP",
+        "PhP": "PHP",
+        "US $": "USD",
     },
     # Sub-centavo wording, per currency.
     "cent_subunit": {"PHP": "Centavos", "USD": "Cents"},
     # OCR digit/letter confusions, applied on word boundaries only.
     "ocr_map": {
         "prope1iies": "properties",
+        "prope1iy": "property",
+        "th1s": "this",
         "1s": "is",
+        "1t": "it",
+        "wa1s": "was",
+        "cornpany": "company",
+        "1n": "in",
+        "ofthe": "of the",
+        "tbe": "the",
     },
     # Parenthesised editorial matter, removed outright.
     "editorial_markers": [
         "Emphasis in the original",
         "Emphasis supplied",
         "Citations omitted",
+        "Emphasis supplied, citations omitted",
+        "Emphasis in the original, citations omitted",
+        "Citation omitted",
     ],
+    # Stray scan artefacts, deleted outright. Keys are regular expressions. A
+    # key that is a single bracketed letter only fires when no word follows, so
+    # the drop-cap form "[j]ust" survives for the bracket repair in step B.
+    "stray_markers": {
+        r"\(awÞhi\(": "",
+        r"\(awÞhi": "",
+        r"\[sic\]": "",
+        r"\[a\.f\.\]": "",
+        r"\[s\]": "",
+        r"\[j\]": "",
+        r"\[t\]": "",
+        r"\[i\]": "",
+        r"\[S\]": "",
+        r"\[R\]": "",
+    },
+    # Master switches for the optional passes. All default on except name
+    # parenthetical stripping, which is deliberately opt-in.
+    "formatting_flags": {
+        "strip_parentheticals": True,
+        "expand_corporate_suffixes": True,
+        "expand_honorifics": True,
+        "spell_out_currencies": True,
+        "spell_out_percentages": True,
+        "strip_name_parentheticals": False,
+        "remove_editorial_markers": True,
+        "fix_ocr_artifacts": True,
+    },
 }
 
 _CONFIG_LOCK = threading.Lock()
@@ -401,33 +498,41 @@ class _LiteralMatcher:
 
     __slots__ = ("_by_first", "_trigger", "_lookup", "_fold", "empty")
 
-    def __init__(self, pairs: list[tuple[str, str]], branch, ignore_case: bool = False,
-                 triggers: str | None = None):
+    def __init__(self, pairs=None, branch=None, ignore_case: bool = False,
+                 triggers: str | None = None, entries=None):
         flags = re.IGNORECASE if ignore_case else 0
-        # Longest key first, so "G.R. Nos." beats "G.R. No." and
-        # "NLRC NCR Case No." beats "NLRC".
-        ordered, seen = [], set()
-        for key, value in sorted(pairs, key=lambda kv: (-len(kv[0]), kv[0])):
-            if key in seen:
-                continue
-            seen.add(key)
-            ordered.append((key, value))
+        if entries is None:
+            # Longest key first, so "G.R. Nos." beats "G.R. No." and
+            # "NLRC NCR Case No." beats "NLRC".
+            ordered, seen = [], set()
+            for key, value in sorted(pairs, key=lambda kv: (-len(kv[0]), kv[0])):
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered.append((key[0], branch(key), value))
+        else:
+            # Pre-branched entries: (first character, branch source, value),
+            # already ordered longest-first by the caller. This is what lets
+            # literal keys and raw regular expressions share one scan.
+            ordered = list(entries)
 
         self.empty = not ordered
         self._fold = ignore_case
         self._lookup: dict[str, str] = {}
         branches: list[str] = []
-        for index, (key, value) in enumerate(ordered):
+        firsts: list[str] = []
+        for index, (first, source, value) in enumerate(ordered):
             name = f"a{index}"
             self._lookup[name] = value.replace("\\", r"\\")
-            branches.append(f"(?P<{name}>{branch(key)})")
+            branches.append(f"(?P<{name}>{source})")
+            firsts.append(first)
 
         if triggers is None:
             # Each branch starts with its own key's first character, so a cheap
             # trigger can narrow each position to the few keys worth trying.
             grouped: dict[str, list[str]] = {}
-            for (key, _), source in zip(ordered, branches):
-                grouped.setdefault(key[0], []).append(source)
+            for first, source in zip(firsts, branches):
+                grouped.setdefault(first, []).append(source)
             self._by_first = {
                 first: re.compile("|".join(group), flags)
                 for first, group in grouped.items()
@@ -499,6 +604,16 @@ def _abbrev_branch(key: str) -> str:
     return rf"(?<![A-Za-z0-9.\-]){body}(?![A-Za-z0-9\-])"
 
 
+def _parenthetical_branch(key: str) -> str:
+    """A parenthetical-strip key, which is *already* a regular expression.
+
+    The configured keys spell out both the full form and its abbreviation, e.g.
+    ``Court of Appeals \\(CA\\)``, so they are used verbatim rather than escaped.
+    Only a boundary is added, keeping the pattern from firing mid-word.
+    """
+    return rf"(?<![A-Za-z0-9]){key}(?![A-Za-z0-9])"
+
+
 def _ocr_branch(key: str) -> str:
     """An OCR fix is only a fix when it lands on whole letters.
 
@@ -524,12 +639,13 @@ def _editorial_branch(key: str) -> str:
 _MATCHER_CACHE: dict[str, tuple[Any, _LiteralMatcher]] = {}
 
 
-def _matcher(kind: str, mapping: Any, pairs: list[tuple[str, str]], branch,
-             ignore_case: bool = False, triggers: str | None = None) -> _LiteralMatcher:
+def _matcher(kind: str, mapping: Any, pairs=None, branch=None,
+             ignore_case: bool = False, triggers: str | None = None,
+             entries=None) -> _LiteralMatcher:
     cached = _MATCHER_CACHE.get(kind)
     if cached is not None and cached[0] is mapping:
         return cached[1]
-    built = _LiteralMatcher(pairs, branch, ignore_case, triggers)
+    built = _LiteralMatcher(pairs, branch, ignore_case, triggers, entries)
     _MATCHER_CACHE[kind] = (mapping, built)
     return built
 
@@ -549,6 +665,67 @@ def _ocr_matcher(config: dict[str, Any]) -> _LiteralMatcher:
         (k, v) for k, v in _config_pairs(ocr) if isinstance(v, str) and v
     ]
     return _matcher("ocr", ocr, pairs, _ocr_branch, ignore_case=True)
+
+
+# Suffixes that name a business form rather than a person. The honorific flag
+# governs everything else in suffix_map, including the legal shorthand (Sec.,
+# Art.) that shares a title's shape.
+_CORPORATE_SUFFIXES = frozenset({"Inc.", "Corp.", "Co.", "Ltd.", "Phils."})
+
+
+def _combined_entries(config: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Merge parenthetical strips and abbreviations into one ordered key set.
+
+    Running the two as separate passes is not safe. Stripping "Court of Appeals
+    (CA)" first leaves "Court of Appeals" and a later pass will leave it alone,
+    but stripping "POEA Standard Employment Contract (POEA-SEC)" leaves a
+    leading "POEA" that the abbreviation pass would expand into the middle of
+    the phrase. One scan, longest key first, consumes the whole full form and
+    never sees the fragment it contains - so no duplicate is ever produced.
+    """
+    flags = config.get("formatting_flags", {})
+    entries: list[tuple[str, str, str]] = []
+    if flags.get("strip_parentheticals", True):
+        for key, value in _config_pairs(config.get("parenthetical_strip", {})):
+            if isinstance(key, str) and key and isinstance(value, str) and value:
+                entries.append((key, _parenthetical_branch(key), value))
+    for key, value in _config_pairs(config.get("abbreviations", {})):
+        if isinstance(key, str) and key and isinstance(value, str) and value:
+            entries.append((key, _abbrev_branch(key), value))
+
+    # Longest configured key first, so a full form beats the abbreviation it
+    # contains whichever section it came from.
+    entries.sort(key=lambda entry: (-len(entry[0]), entry[0]))
+    unique: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for key, source, value in entries:
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((key[0], source, value))
+    return unique
+
+
+def _combined_matcher(config: dict[str, Any]) -> _LiteralMatcher:
+    return _matcher("combined", config, entries=_combined_entries(config))
+
+
+def _suffix_entries(config: dict[str, Any]) -> list[tuple[str, str]]:
+    flags = config.get("formatting_flags", {})
+    pairs: list[tuple[str, str]] = []
+    for key, value in _config_pairs(config.get("suffix_map", {})):
+        if not isinstance(key, str) or not isinstance(value, str) or not value:
+            continue
+        if key in _CORPORATE_SUFFIXES:
+            if flags.get("expand_corporate_suffixes", True):
+                pairs.append((key, value))
+        elif flags.get("expand_honorifics", True):
+            pairs.append((key, value))
+    return pairs
+
+
+def _suffix_matcher(config: dict[str, Any]) -> _LiteralMatcher:
+    return _matcher("suffix", config, _suffix_entries(config), _abbrev_branch)
 
 
 # --------------------------------------------------------------------------- #
@@ -571,24 +748,42 @@ _FOOTNOTE_DIGITS_AFTER_PERIOD = re.compile(
 )
 # Whole numbers in square brackets: [1], [2], [33]
 _BRACKETED_REF = re.compile(r"\[\s*[0-9\u00b9\u00b2\u00b3]{1,4}\s*\]")
-# Bracketed markers that stand alone. The negative lookahead is what keeps
-# "[j]ust" and "[s]ir" alive for step B to repair.
-_STRAY_BRACKET = re.compile(r"\[\s*(?:s|j|t)\s*\](?![A-Za-z])")
-_SIC = re.compile(r"\[\s*sic\s*\]", re.IGNORECASE)
-_AF = re.compile(r"\[\s*a\.?f\.?\s*\]", re.IGNORECASE)
-# OCR garbage seen in the scanned opinions, e.g. "(awit)".
-_OCR_MARKER = re.compile(r"\(\s*aw[Þþ]hi\s*\(?\s*\)?")
+# Stray scan artefacts live in the ``stray_markers`` config. A key that is a
+# single bracketed letter is a drop cap when a word follows it ("[j]ust",
+# "[R]espondent"), so it only fires when the bracket stands alone. The
+# lookahead is what keeps the bracket repair in step B from being handed an
+# amputated word.
+_SINGLE_LETTER_BRACKET = re.compile(r"\\\[\s*[A-Za-z]\s*\\\]")
+
+
+def _apply_stray_markers(text: str, config: dict[str, Any]) -> str:
+    """Delete the configured scan artefacts, longest pattern first.
+
+    Ordering matters for nested keys such as ``\(awÞhi\(`` and ``\(awÞhi``.
+    Replacements are empty, so rescanning a previous rule's output is harmless;
+    this stays a plain loop instead of a shared matcher for that reason.
+    """
+    rules: list[tuple[int, str, str]] = []
+    for key, value in _config_pairs(config.get("stray_markers", {})):
+        if not isinstance(key, str) or not key:
+            continue
+        replacement = value if isinstance(value, str) else ""
+        pattern = f"{key}(?![A-Za-z])" if _SINGLE_LETTER_BRACKET.fullmatch(key) else key
+        rules.append((len(key), pattern, replacement))
+    rules.sort(key=lambda rule: -rule[0])
+    for _, pattern, replacement in rules:
+        text = re.sub(pattern, replacement, text)
+    return text
 
 
 def _step_a(text: str, config: dict[str, Any]) -> str:
     text = _FOOTNOTE_DIGITS.sub("", text)
     text = _FOOTNOTE_DIGITS_AFTER_PERIOD.sub(".", text)
     text = _BRACKETED_REF.sub("", text)
-    text = _OCR_MARKER.sub("", text)
-    text = _SIC.sub("", text)
-    text = _AF.sub("", text)
-    text = _STRAY_BRACKET.sub("", text)
-    return _editorial_matcher(config).sub(text)
+    text = _apply_stray_markers(text, config)
+    if config.get("formatting_flags", {}).get("remove_editorial_markers", True):
+        text = _editorial_matcher(config).sub(text)
+    return text
 
 
 # --------------------------------------------------------------------------- #
@@ -601,17 +796,23 @@ def _step_a(text: str, config: dict[str, Any]) -> str:
 _BRACKETED_INITIAL = re.compile(r"\[([A-Za-z])\]([A-Za-z])")
 # Brackets around a single letter with no word attached.
 _LONE_LETTER_BRACKET = re.compile(r"\[([A-Za-z])\]")
+# A name-like parenthetical: two to five capitalised words, no digits. Opt-in,
+# because it is the only rule here that can remove ordinary prose.
+_NAME_PARENTHETICAL = re.compile(
+    r"\s*\(\s*[A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){1,4}\s*\)"
+)
 _MULTISPACE = re.compile(r"[ \t]{2,}")
 _TRAILING_WS = re.compile(r"[ \t]+$", re.MULTILINE)
 
 
 def _step_b(text: str, config: dict[str, Any]) -> str:
-    # One scan for every configured OCR fix, not one pass per fix.
-    text = _ocr_matcher(config).sub(text)
+    if config.get("formatting_flags", {}).get("fix_ocr_artifacts", True):
+        # One scan for every configured OCR fix, not one pass per fix.
+        text = _ocr_matcher(config).sub(text)
 
-    # "Comi" is OCR for "Court". The word boundary keeps "Commission" and
-    # "Committee" intact.
-    text = re.sub(r"(?<![A-Za-z])Comi(?![A-Za-z])", "Court", text)
+        # "Comi" is OCR for "Court". The word boundary keeps "Commission" and
+        # "Committee" intact.
+        text = re.sub(r"(?<![A-Za-z])Comi(?![A-Za-z])", "Court", text)
 
     # NOTE: "legal feet to stand on" is intentionally left alone. The scanner
     # produces "foots" there, and it is a fixed idiom that reads correctly
@@ -625,13 +826,96 @@ def _step_b(text: str, config: dict[str, Any]) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Step C - abbreviations
+# Step C - parentheses and abbreviations
 # --------------------------------------------------------------------------- #
 
+# The config map covers the institutional pairs worth naming, but party names
+# are unbounded: "Jaime C. Juadines (Juadines)", "Louiejie G. Bautista
+# (Bautista)". These are dropped only when they *provably* repeat the words
+# before them - a token already present, or the exact initials of the preceding
+# capitalised words - so an unrelated short form such as "Agency, Inc. (Arsia)"
+# is left alone. Role tags are never treated as redundant.
+_REDUNDANT_PARENTHETICAL = re.compile(r"\(\s*([^()]{1,40}?)\s*\)")
+_WORD = re.compile(r"[A-Za-z][A-Za-z.\-']*")
+_LOOKBACK_WORDS = 8
+_ROLE_WORDS = frozenset({
+    "petitioner", "petitioners", "respondent", "respondents", "accused",
+    "complainant", "complainants", "appellant", "appellants", "appellee",
+    "appellees", "plaintiff", "plaintiffs", "defendant", "defendants",
+    "prosecution", "movant", "oppositor", "intervenor", "herein", "supra",
+    "infra", "ibid", "id", "sic",
+})
+
+
+def _is_redundant_parenthetical(before: str, content: str) -> bool:
+    """Whether ``content`` provably repeats the words immediately before it."""
+    token = content.strip().strip(".\u2019'")
+    if not token or not token.isalpha():
+        return False
+    norm = token.lower()
+    if norm in _ROLE_WORDS:
+        return False
+
+    words = _WORD.findall(before)[-_LOOKBACK_WORDS:]
+    if not words:
+        return False
+    if any(word.strip(".-'").lower() == norm for word in words):
+        return True
+    # "Court of Appeals (Ca)" - the letters are the initials of the preceding
+    # capitalised words, ignoring the lowercase joiners between them. Any
+    # contiguous run of those words may supply the letters, so a leading "The"
+    # does not spoil "The Supreme Court (SC)".
+    if 2 <= len(token) <= 8:
+        capitals = [word for word in words if word[0].isupper()]
+        for index in range(len(capitals)):
+            initials = "".join(word[0].lower() for word in capitals[index:])
+            if initials == norm:
+                return True
+    return False
+
+
+def _strip_redundant_parentheticals(text: str) -> str:
+    out: list[str] = []
+    pos = 0
+    # A short tail of what has already been emitted. It is the context the
+    # parenthetical is judged against, so a parenthetical removed earlier never
+    # contributes its letters to a later initials test.
+    recent = ""
+    for match in _REDUNDANT_PARENTHETICAL.finditer(text):
+        if not _is_redundant_parenthetical(recent + text[pos: match.start()],
+                                           match.group(1)):
+            continue
+        start = match.start()
+        # Swallow the space in front so "Name (Name)," becomes "Name,".
+        if start > pos and text[start - 1] == " ":
+            start -= 1
+        emitted = text[pos:start]
+        out.append(emitted)
+        recent = (recent + emitted)[-200:]
+        pos = match.end()
+    if not out:
+        return text
+    out.append(text[pos:])
+    return "".join(out)
+
+
 def _step_c(text: str, config: dict[str, Any]) -> str:
-    abbrevs = config.get("abbreviations", {})
-    pairs = [(k, v) for k, v in _config_pairs(abbrevs) if isinstance(v, str) and v]
-    return _matcher("abbreviations", abbrevs, pairs, _abbrev_branch).sub(text)
+    """Strip parenthetical abbreviations and expand standalone ones (steps 4-5).
+
+    Both jobs run in one left-to-right pass, so a stripped full form is never
+    re-expanded and no duplicate is produced. See ``_combined_entries``. The
+    generic redundant-parenthetical pass then catches party short forms that the
+    configured map cannot enumerate.
+    """
+    text = _combined_matcher(config).sub(text)
+    if config.get("formatting_flags", {}).get("strip_parentheticals", True):
+        text = _strip_redundant_parentheticals(text)
+    return text
+
+
+def _step_c_suffixes(text: str, config: dict[str, Any]) -> str:
+    """Expand corporate and honorific suffixes (step 6)."""
+    return _suffix_matcher(config).sub(text)
 
 
 # --------------------------------------------------------------------------- #
@@ -665,6 +949,7 @@ def _spell_percent(value: str) -> str:
 
 
 def _step_d(text: str, config: dict[str, Any]) -> str:
+    flags = config.get("formatting_flags", {})
     currency = config.get("currency_map", {})
     aliases = config.get("currency_aliases", {})
     subunits = config.get("cent_subunit", {})
@@ -683,8 +968,10 @@ def _step_d(text: str, config: dict[str, Any]) -> str:
             out += f" and {number_to_words(cents)} {unit}"
         return out
 
-    text = _AMOUNT.sub(money, text)
-    text = _PERCENT.sub(lambda m: _spell_percent(m.group(1)), text)
+    if flags.get("spell_out_currencies", True):
+        text = _AMOUNT.sub(money, text)
+    if flags.get("spell_out_percentages", True):
+        text = _PERCENT.sub(lambda m: _spell_percent(m.group(1)), text)
     return text
 
 
@@ -789,7 +1076,10 @@ def preprocess_legal_text(text: str) -> str:
 
     work = _step_a(work, config)
     work = _step_b(work, config)
+    if config.get("formatting_flags", {}).get("strip_name_parentheticals", False):
+        work = _NAME_PARENTHETICAL.sub("", work)
     work = _step_c(work, config)
+    work = _step_c_suffixes(work, config)
     work = _step_d(work, config)
     work = _step_e_structure(work)
     work = _step_e_spacing(work, config)

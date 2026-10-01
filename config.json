@@ -1,12 +1,15 @@
 {
-  "_comment": "Editable mappings for app/legal_preprocessor.py. Delete any key to fall back to the built-in default; add a key to override it. Loaded once at startup with json.load(), and a missing or malformed file is non-fatal - the module falls back to the defaults compiled into it.",
+  "_comment": "Editable mappings for app/legal_preprocessor.py. Delete any key to fall back to the built-in default; add a key to override it. Loaded once at startup with json.load(), and a missing or malformed file is non-fatal.",
 
   "abbreviations": {
     "G.R. No.": "G.R. Number",
     "G.R. Nos.": "G.R. Numbers",
     "CA-G.R. SP No.": "CA-G.R. SP Number",
+    "CA-G.R. CV No.": "CA-G.R. CV Number",
     "NLRC LAC No.": "NLRC LAC Number",
     "NLRC NCR Case No.": "NLRC NCR Case Number",
+    "NLRC RAB Case No.": "NLRC RAB Case Number",
+    "NLRC Case No.": "NLRC Case Number",
     "No.": "Number",
     "Nos.": "Numbers",
     "RTC": "Regional Trial Court",
@@ -26,8 +29,8 @@
     "NCR": "National Capital Region",
     "RAB": "Regional Arbitration Branch",
     "VAC": "Voluntary Arbitration Case",
-
-    "_caution": "The next group came from a clinical/general corpus, not from Philippine case law. They are inert on legal text in most cases but will fire on the words below, so delete the ones you do not want. CT, ILO and CBA in particular are common enough in unrelated writing to misfire.",
+    "RA": "Republic Act",
+    "PD": "Presidential Decree",
     "ILO": "International Labour Organization",
     "CBA": "collective bargaining agreement",
     "CT": "computed tomography",
@@ -35,12 +38,53 @@
     "HR": "Human Resources",
     "CCTV": "closed-circuit television",
     "SeNA": "single-entry approach",
-
-    "_caution_2": "These are corporate names. They expand only as standalone words, so they are usually safe, but they will rewrite a party name that happens to appear alone on a line - set the value to the key itself to neutralise one.",
     "MMI": "Multinational Maritime, Inc.",
     "MMS": "MMS. Co., Ltd.",
     "AJSU": "All Japan Seamen's Union",
     "NSC": "National Steel Corporation"
+  },
+
+  "parenthetical_strip": {
+    "Court of Appeals \\(CA\\)": "Court of Appeals",
+    "National Labor Relations Commission \\(NLRC\\)": "National Labor Relations Commission",
+    "Regional Trial Court \\(RTC\\)": "Regional Trial Court",
+    "Land Registration Court \\(LRC\\)": "Land Registration Court",
+    "Land Registration Authority \\(LRA\\)": "Land Registration Authority",
+    "Office of the Solicitor General \\(OSG\\)": "Office of the Solicitor General",
+    "Philippines Overseas Employment Administration \\(POEA\\)": "Philippines Overseas Employment Administration",
+    "POEA Standard Employment Contract \\(POEA-SEC\\)": "POEA Standard Employment Contract",
+    "collective bargaining agreement \\(CBA\\)": "collective bargaining agreement",
+    "Original Certificate of Title \\(OCT\\)": "Original Certificate of Title",
+    "Transfer Certificate of Title \\(TCT\\)": "Transfer Certificate of Title",
+    "computed tomography \\(CT\\)": "computed tomography",
+    "Human Resources \\(HR\\)": "Human Resources",
+    "closed-circuit television \\(CCTV\\)": "closed-circuit television",
+    "Armed Forces of the Philippines \\(AFP\\)": "Armed Forces of the Philippines",
+    "International Labour Organization \\(ILO\\)": "International Labour Organization",
+    "Associated Marine Officers' and Seamen's Union of the Philippines \\(AMOSUP\\)": "Associated Marine Officers' and Seamen's Union of the Philippines",
+    "National Capital Region \\(NCR\\)": "National Capital Region",
+    "single-entry approach \\(SeNA\\)": "single-entry approach",
+    "Regional Arbitration Branch \\(RAB\\)": "Regional Arbitration Branch"
+  },
+
+  "suffix_map": {
+    "Inc.": "Incorporated",
+    "Corp.": "Corporation",
+    "Co.": "Company",
+    "Ltd.": "Limited",
+    "Phils.": "Philippines",
+    "Jr.": "Junior",
+    "Sr.": "Senior",
+    "Atty.": "Attorney",
+    "Capt.": "Captain",
+    "Dr.": "Doctor",
+    "Hon.": "Honorable",
+    "St.": "Street",
+    "Brgy.": "Barangay",
+    "Sec.": "Section",
+    "Art.": "Article",
+    "J.": "Justice",
+    "JJ.": "Justices"
   },
 
   "currency_map": {
@@ -49,13 +93,15 @@
   },
 
   "currency_aliases": {
-    "_comment": "How amounts are written in practice. Philippine decisions almost never say 'PHP' - they write 'P' or the peso sign - so without these aliases the currency pass misses nearly every real amount. The digit string that follows is what gets spelled out.",
     "PHP": "PHP",
     "USD": "USD",
     "P": "PHP",
     "US$": "USD",
     "$": "USD",
-    "₱": "PHP"
+    "₱": "PHP",
+    "Php": "PHP",
+    "PhP": "PHP",
+    "US $": "USD"
   },
 
   "cent_subunit": {
@@ -64,17 +110,48 @@
   },
 
   "ocr_map": {
-    "_comment": "Digit-for-letter confusions from the scanner, matched on word boundaries only. The spec named 1s and prope1iies; th1s, 1t and wa1s are added because they are the most frequent equivalents in scanned opinions and cost nothing. Add your own here.",
     "prope1iies": "properties",
+    "prope1iy": "property",
     "th1s": "this",
     "1s": "is",
     "1t": "it",
-    "wa1s": "was"
+    "wa1s": "was",
+    "cornpany": "company",
+    "1n": "in",
+    "ofthe": "of the",
+    "tbe": "the"
   },
 
   "editorial_markers": [
     "Emphasis in the original",
     "Emphasis supplied",
-    "Citations omitted"
-  ]
+    "Citations omitted",
+    "Emphasis supplied, citations omitted",
+    "Emphasis in the original, citations omitted",
+    "Citation omitted"
+  ],
+
+  "stray_markers": {
+    "\\(awÞhi\\(": "",
+    "\\(awÞhi": "",
+    "\\[sic\\]": "",
+    "\\[a\\.f\\.\\]": "",
+    "\\[s\\]": "",
+    "\\[j\\]": "",
+    "\\[t\\]": "",
+    "\\[i\\]": "",
+    "\\[S\\]": "",
+    "\\[R\\]": ""
+  },
+
+  "formatting_flags": {
+    "strip_parentheticals": true,
+    "expand_corporate_suffixes": true,
+    "expand_honorifics": true,
+    "spell_out_currencies": true,
+    "spell_out_percentages": true,
+    "strip_name_parentheticals": false,
+    "remove_editorial_markers": true,
+    "fix_ocr_artifacts": true
+  }
 }
