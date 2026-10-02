@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["httpx"]
+dev = ["httpx", "pyinstaller"]
 
 [tool.setuptools]
 packages = ["app"]

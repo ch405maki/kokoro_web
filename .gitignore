@@ -26,9 +26,14 @@ server.err
 
 # HuggingFace model cache (weights are ~330 MB, re-downloadable)
 models/
+bundled_weights/
 *.pt
 *.pth
 *.safetensors
+
+# PyInstaller output
+build/
+dist/
 
 # OS
 .DS_Store

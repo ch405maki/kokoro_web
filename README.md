@@ -4,13 +4,14 @@ Text-to-speech running entirely on this machine using [Kokoro-82M](https://githu
 an 82-million-parameter open-weight model that rivals much larger systems while staying fast enough
 for CPU-only inference. No API keys, no network calls at inference time, no per-character cost.
 
-Three ways in, all sharing one engine:
+Four ways in, all sharing one engine:
 
 | Interface | Entry point | Good for |
 |---|---|---|
 | Browser UI | `run_server.bat` then open `http://127.0.0.1:8000` | Trying voices, quick jobs |
 | REST API | `POST http://127.0.0.1:8000/speak` | Other apps, scripts, automation |
 | CLI | `speak.bat "some text"` | Batch jobs, pipelines, one-offs |
+| Desktop app | `build_exe.bat`, then `dist\KokoroTTS\KokoroTTS.exe` | No server and no browser at all |
 
 ---
 
@@ -480,6 +481,9 @@ run_server.bat                                # terminal 1
 # preprocessor suite: 75 tests, no server needed
 .venv\Scripts\python.exe -m unittest tests.test_preprocessor -v
 
+# desktop app logic: no GUI/torch/display needed
+.venv\Scripts\python.exe -m unittest tests.test_desktop -v
+
 # throughput table
 .venv\Scripts\python.exe tests\bench.py
 ```
@@ -658,6 +662,92 @@ uvicorn app.server:app --host 0.0.0.0 --port 8001 --workers 2
 Each worker loads its own copy of the weights (~330 MB RAM) so size the box
 accordingly.
 
+### Standalone desktop app (.exe)
+
+If you do not want to run a server at all, `app/desktop.py` provides a plain
+Tkinter window that calls the same engine directly - no HTTP, no browser. It runs
+from a checkout with:
+
+```powershell
+.venv\Scripts\python.exe desktop_app.py
+```
+
+To freeze it into a self-contained Windows build:
+
+```powershell
+# once: PyInstaller is a dev dependency, but the venv has no pip
+uv pip install --python ".venv\Scripts\python.exe" pyinstaller
+
+build_exe.bat
+```
+
+`build_exe.bat` fetches the model weights into `bundled_weights\hf` (unless they
+are already there), then runs PyInstaller against `kokoro_desktop.spec`. The
+result is `dist\KokoroTTS\KokoroTTS.exe`.
+
+The window carries the same formatting pipeline as the browser UI, and shares
+its defaults:
+
+- **Auto-Format** cleans the text with the legal preprocessor and applies the
+  same title-case pass as the web UI, writing the result back into the box so
+  you always see exactly what will be spoken. Typed and pasted text is
+  title-cased automatically once you pause. With **Clean legal text before
+  speaking** checked (the default), the same formatting runs again before
+  **Generate**, so the audio is never built from uncleaned text.
+- **MP3 is the default format**, matching the web UI, at `KOKORO_MP3_BITRATE`
+  (`96k`). WAV is still one click away. As above, MP3 needs `ffmpeg` on `PATH`.
+- A **character count** sits beside the label and tracks the box live, showing
+  the input size and a rough spoken length (`1,234 characters · ~1m 22s`). After
+  synthesis the status line reports the real audio length in hours, minutes and
+  seconds, alongside the chunk count and file size.
+
+Three things are worth knowing before you build:
+
+- **Ship the whole folder.** This is an *onedir* build, not onefile. Onefile
+  would unpack several gigabytes of torch to `%TEMP%` on every launch, which
+  adds tens of seconds to startup. Copy `dist\KokoroTTS\`, not just the `.exe`.
+- **The weights are bundled for offline use.** `app/weights.py` points `HF_HOME`
+  at the bundled cache and sets `HF_HUB_OFFLINE=1` before anything imports
+  `huggingface_hub`, so the app never touches the network. Expect a build around
+  2-3 GB; the fetch step can be pointed at an existing cache with
+  `KOKORO_WEIGHTS_DIR`.
+- **MP3 output still needs `ffmpeg` on PATH.** WAV is fully self-contained. If
+  you need MP3 in a locked-down machine, drop `ffmpeg.exe` next to the app and
+  add its folder to `PATH`.
+- **`misaki.en` needs the spaCy model `en_core_web_sm`.** `build_exe.bat`
+  installs it when missing. Without it the model loads but the first synthesis
+  fails with `[E050] Can't find model 'en_core_web_sm'`.
+
+Build on Windows only - PyInstaller does not cross-compile. An unsigned exe may
+trip SmartScreen on first run.
+
+A window launch alone does not prove the bundle works, because `torch` and
+`kokoro` are only imported when you press Generate. To verify a build end to end,
+`smoke.spec` produces a **windowed** exe (matching the real app) that loads the
+weights and synthesizes one line, writing its result to a file since a windowed
+process has no console:
+
+```powershell
+.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean smoke.spec
+$env:KOKORO_WEIGHTS_DIR = "$PWD\bundled_weights\hf"
+.\dist\FrozenSmoke\FrozenSmoke.exe
+Get-Content smoke_out.txt
+# OK chunks=1 bytes=144044 type=audio/wav device=cpu
+```
+
+That check caught three things PyInstaller gets wrong by default:
+
+- `language_tags` JSON subtag tables (via `phonemizer`) were not collected.
+- The spaCy model `en_core_web_sm` was not bundled.
+- A windowed build has `sys.stdout` and `sys.stderr` set to `None`, and importing
+  `kokoro` runs `loguru.logger.add(sys.stderr, ...)`, which raises
+  `TypeError: Cannot log to objects of type 'NoneType'`. `ensure_standard_streams()`
+  in `app/desktop.py` points both at the null device before any import can see
+  them; the smoke test is windowed precisely so this stays covered.
+
+The window and the weights logic are covered by `tests/test_desktop.py`, which
+runs against a stub engine and needs no GUI, torch or display.
+
 ---
 
 ## 8. Files
@@ -667,13 +757,21 @@ app/
   engine.py           model loading, synthesis, voice catalog, wav/mp3 encoding
   server.py           FastAPI app: /speak /preprocess /voices /health /warmup /docs
   cli.py              argparse CLI
+  desktop.py          Tkinter desktop app + testable SynthesisController
+  weights.py          bundled-weights location, offline bootstrap, fetch command
   static/index.html   web UI, self-contained, no build step
 legal_preprocessor.py  legal-text cleaner behind /preprocess
 tests/
   test_api.py         64-check end-to-end suite
   test_preprocessor.py  75-test preprocessor suite (unittest, no server needed)
+  test_desktop.py     desktop suite: controller, formatting, counter, weights
   bench.py            throughput benchmark
 config.json           abbreviation / OCR / currency mappings for the preprocessor
+desktop_app.py        entry point for the frozen desktop executable
+kokoro_desktop.spec   PyInstaller spec for the standalone build
+smoke.spec            PyInstaller spec for the console bundle smoke test
+tools/frozen_smoke.py console entry that synthesizes from the frozen build
+build_exe.bat         fetch weights + build dist\KokoroTTS\KokoroTTS.exe
 output/               generated audio (gitignored)
 deploy/
   install-centos.sh   idempotent CentOS Stream/Rocky/Alma 9 installer
