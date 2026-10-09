@@ -69,6 +69,29 @@ class TestFootnoteAndMarkerRemoval(unittest.TestCase):
         # A spaced asterisk reads as a separator/multiplication, not markdown.
         self.assertEqual(clean("2 * 3 = 6"), "2 * 3 = 6")
 
+    def test_lawphil_watermark_garbles_are_removed(self):
+        samples = [
+            "ℒαwρhi৷", "LaW㏗iL", "ᇈWᑭHIL", "1aшphi1", "7!ᕼdMᗄ7",
+            "(awÞhi(", "+3u.7!ydmb7", "£A⩊phi£", "⌊aшΡhi⌊",
+            "⚖ - ℒαɯρhi৷", "1a⍵⍴h!1", "äre||anº•1àw",
+            "têñ.£îhqwâ£", "1äwphï1.ñët",
+        ]
+        for garbled in samples:
+            self.assertEqual(clean(f"the ruling {garbled} stands"),
+                             "the ruling stands")
+
+    def test_lawphil_watermark_title_case_variants_are_removed(self):
+        # The UI and desktop title-case the input before cleaning, so the ASCII
+        # letters inside a garble arrive re-cast: "LaW㏗iL" becomes "Law㏗Il".
+        title_cased = [
+            "Law㏗Il", "ᇈwᑭhil", "7!ᕼdmᗄ7", "(Awþhi(", "+3u.!Ydmb",
+            "£a⩊Phi£", "⌊Aшρhi⌊", "1a⍵⍴H!1", "Äre||Anº•1àw",
+            "Têñ.£Îhqwâ£", "1äwphï1.Ñët",
+        ]
+        for garbled in title_cased:
+            self.assertEqual(clean(f"the ruling {garbled} stands"),
+                             "the ruling stands")
+
     def test_real_numbers_are_not_mistaken_for_footnotes(self):
         # Regression: the footnote rule used to delete the ",000.00" tail of an
         # amount, because those digits followed a comma.
@@ -94,6 +117,17 @@ class TestOcrFixes(unittest.TestCase):
         # the hyphenated spellings that appear in real orders are untouched.
         self.assertEqual(clean("COVID-19 and SARS-COV-2"), "COVID-19 and SARS-COV-2")
         self.assertEqual(clean("COVID 19 cases"), "COVID 19 cases")
+
+    def test_letter_spaced_words_are_rejoined(self):
+        self.assertEqual(clean("D E C I S I O N"), "DECISION")
+        self.assertEqual(clean("the D E C I S I O N is final"), "the DECISION is final")
+        # A split acronym is rejoined in time to expand.
+        self.assertEqual(
+            clean("the N L R C ruled"),
+            "the National Labor Relations Commission ruled",
+        )
+        # A lower-case run is an ordinary list, not a scanner artifact.
+        self.assertEqual(clean("a b c d e"), "a b c d e")
 
     def test_excess_whitespace_is_collapsed(self):
         self.assertEqual(clean("a     b"), "a b")
@@ -169,7 +203,7 @@ class TestLiteralMatcherInternals(unittest.TestCase):
 
         # And the real config is back in force.
         self.assertEqual(clean("a ZZZ appears"), "a ZZZ appears")
-        self.assertEqual(clean("G.R. No. 5"), "G.R. Number 5")
+        self.assertEqual(clean("G.R. No. 5"), "G.R. Number-5")
         self.assertEqual(clean("[Emphasis supplied] x"), "x")
 
 
@@ -177,11 +211,11 @@ class TestAbbreviations(unittest.TestCase):
     """Step C - configured standalone abbreviations."""
 
     def test_citation_markers(self):
-        self.assertEqual(clean("G.R. No. 64100"), "G.R. Number 64100")
-        self.assertEqual(clean("G.R. Nos. 64100, 64101"), "G.R. Numbers 64100, 64101")
-        self.assertEqual(clean("CA-G.R. SP No. 12345"), "CA-G.R. SP Number 12345")
-        self.assertEqual(clean("NLRC LAC No. 5"), "NLRC LAC Number 5")
-        self.assertEqual(clean("NLRC NCR Case No. 9"), "NLRC NCR Case Number 9")
+        self.assertEqual(clean("G.R. No. 64100"), "G.R. Number-64100")
+        self.assertEqual(clean("G.R. Nos. 64100, 64101"), "G.R. Numbers-64100, 64101")
+        self.assertEqual(clean("CA-G.R. SP No. 12345"), "CA-G.R. SP Number-12345")
+        self.assertEqual(clean("NLRC LAC No. 5"), "NLRC LAC Number-5")
+        self.assertEqual(clean("NLRC NCR Case No. 9"), "NLRC NCR Case Number-9")
 
     def test_agency_expansions(self):
         self.assertEqual(
@@ -189,6 +223,32 @@ class TestAbbreviations(unittest.TestCase):
             "per Regional Trial Court and National Labor Relations Commission",
         )
         self.assertEqual(clean("the CA ruled"), "the Court of Appeals ruled")
+
+    def test_title_cased_acronyms_still_expand(self):
+        # The UI title-cases its input, so "NLRC" arrives as "Nlrc".
+        self.assertEqual(
+            clean("the Nlrc ruled"),
+            "the National Labor Relations Commission ruled",
+        )
+        self.assertEqual(clean("the Rtc ruled"), "the Regional Trial Court ruled")
+        # A redundant parenthetical is stripped, never expanded.
+        self.assertEqual(
+            clean("Court of Appeals (Ca) ruled"),
+            "Court of Appeals ruled",
+        )
+
+    def test_docket_numbers_are_hyphenated(self):
+        self.assertEqual(clean("No. 208258"), "Number-208258")
+        self.assertEqual(clean("G.R. No. 5"), "G.R. Number-5")
+        self.assertEqual(clean("G.R. No. 64100"), "G.R. Number-64100")
+        self.assertEqual(clean("G.R. Nos. 64100, 64101"), "G.R. Numbers-64100, 64101")
+        self.assertEqual(clean("No. 5."), "Number-5.")
+
+    def test_letter_prefixed_dockets_expand_too(self):
+        self.assertEqual(clean("No. P-12-3091"), "Number-P-12-3091")
+        self.assertEqual(clean("No. N-208258"), "Number-N-208258")
+        # A bare word after "No." still must not match.
+        self.assertEqual(clean("No person shall do this"), "No person shall do this")
 
     def test_party_separator_vs_expands_to_versus(self):
         self.assertEqual(clean("People vs. Santos"), "People versus Santos")
@@ -215,19 +275,19 @@ class TestAbbreviations(unittest.TestCase):
         # Regression: substituting "NLRC LAC No." and then "NLRC" used to
         # rewrite the acronym inside its own replacement, yielding
         # "National Labor Relations Commission LAC Number".
-        self.assertEqual(clean("NLRC LAC No. 5"), "NLRC LAC Number 5")
-        self.assertEqual(clean("NLRC NCR Case No. 9"), "NLRC NCR Case Number 9")
+        self.assertEqual(clean("NLRC LAC No. 5"), "NLRC LAC Number-5")
+        self.assertEqual(clean("NLRC NCR Case No. 9"), "NLRC NCR Case Number-9")
 
     def test_new_citation_markers_and_statutes(self):
-        self.assertEqual(clean("CA-G.R. CV No. 12345"), "CA-G.R. CV Number 12345")
-        self.assertEqual(clean("NLRC RAB Case No. 7"), "NLRC RAB Case Number 7")
-        self.assertEqual(clean("NLRC Case No. 9"), "NLRC Case Number 9")
+        self.assertEqual(clean("CA-G.R. CV No. 12345"), "CA-G.R. CV Number-12345")
+        self.assertEqual(clean("NLRC RAB Case No. 7"), "NLRC RAB Case Number-7")
+        self.assertEqual(clean("NLRC Case No. 9"), "NLRC Case Number-9")
         self.assertEqual(clean("RA 8042 and PD 442"), "Republic Act 8042 and Presidential Decree 442")
 
     def test_abbr_period_does_not_gain_a_space(self):
         # Regression: the spacing pass turned "G.R. Number" into "G. R. Number".
-        self.assertEqual(clean("G.R. No. 64100"), "G.R. Number 64100")
-        self.assertEqual(clean("CA-G.R. SP No. 12345"), "CA-G.R. SP Number 12345")
+        self.assertEqual(clean("G.R. No. 64100"), "G.R. Number-64100")
+        self.assertEqual(clean("CA-G.R. SP No. 12345"), "CA-G.R. SP Number-12345")
 
     def test_ordinary_sentence_endings_still_get_a_space(self):
         self.assertEqual(clean("The order was reversed.The court ruled"), "The order was reversed. The court ruled")
@@ -294,7 +354,7 @@ class TestNumbers(unittest.TestCase):
     def test_case_numbers_are_left_as_digits(self):
         # Only currency and percentages are spelled out; a case number must
         # stay intact for the reader.
-        self.assertEqual(clean("G.R. No. 64100"), "G.R. Number 64100")
+        self.assertEqual(clean("G.R. No. 64100"), "G.R. Number-64100")
 
 
 class TestProtectedSegments(unittest.TestCase):
@@ -378,7 +438,7 @@ class TestConfig(unittest.TestCase):
         # the engine's chunker reads it. The preprocessor must not swallow it
         # or mangle the word that follows.
         self.assertEqual(clean("/hello world"), "/hello world")
-        self.assertEqual(clean("/G.R. No. 64100 and /goodbye"), "/G.R. Number 64100 and /goodbye")
+        self.assertEqual(clean("/G.R. No. 64100 and /goodbye"), "/G.R. Number-64100 and /goodbye")
 
 
 class TestPipelineBehaviour(unittest.TestCase):
@@ -405,10 +465,10 @@ class TestPipelineBehaviour(unittest.TestCase):
         )
         out = clean(src)
         self.assertIn("PER CURIAM:", out)
-        self.assertIn("G.R. Number 64100", out)
+        self.assertIn("G.R. Number-64100", out)
         self.assertIn("properties", out)
         self.assertIn("One Hundred Thousand Pesos", out)
-        self.assertIn("CA-G.R. SP Number 12345", out)
+        self.assertIn("CA-G.R. SP Number-12345", out)
         self.assertIn("The Court of Appeals affirmed", out)
         self.assertNotIn("[1]", out)
         self.assertNotIn("Certiorari1", out)
@@ -523,7 +583,7 @@ class TestRedundantParentheticals(unittest.TestCase):
         self.assertEqual(clean(src), src)
 
     def test_bracketed_citations_are_not_touched(self):
-        self.assertEqual(clean("G.R. No. 64100 (2019)"), "G.R. Number 64100 (2019)")
+        self.assertEqual(clean("G.R. No. 64100 (2019)"), "G.R. Number-64100 (2019)")
 
 
 class TestSuffixExpansion(unittest.TestCase):

@@ -213,7 +213,7 @@ things, in order:
 | 2 | Repairs OCR damage and collapses runs of spaces | `prope1iies` → `properties`, `1s` → `is`, `[j]ust` → `just` |
 | 3 | Removes editorial markers | `(Emphasis supplied)`, `(Citations omitted)` |
 | 4 | Drops a redundant parenthetical (a configured pair, a repeated token, or the initials of what precedes it) | `Court of Appeals (CA)` → `Court of Appeals`, `Juadines (Juadines)` → `Juadines` |
-| 5 | Expands remaining standalone abbreviations | `CA` → `Court of Appeals`, `G.R. No.` → `G.R. Number`, `vs.`/`vs` → `versus` |
+| 5 | Expands remaining standalone abbreviations; joins a citation to its docket number | `CA` → `Court of Appeals`, `G.R. No. 64100` → `G.R. Number-64100`, `No. P-12-3091` → `Number-P-12-3091`, `vs.`/`vs` → `versus` |
 | 6 | Expands corporate and honorific suffixes | `Inc.` → `Incorporated`, `Capt.` → `Captain` |
 | 7 | Spells out currency amounts | `PHP 91,575.65` → `Ninety-One Thousand Five Hundred Seventy-Five Pesos and Sixty-Five Centavos` |
 | 8 | Spells out percentages | `10%` → `ten percent` |

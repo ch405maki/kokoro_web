@@ -316,7 +316,7 @@ def main() -> int:
     out = json.loads(raw)
     check("strips the footnote digit", "Certiorari1" not in out.get("text", ""), repr(out.get("text")))
     check("strips the bracketed reference", "[1]" not in out.get("text", ""))
-    check("expands the citation marker", "G.R. Number 64100" in out.get("text", ""), repr(out.get("text")))
+    check("expands the citation marker", "G.R. Number-64100" in out.get("text", ""), repr(out.get("text")))
     check("reports changed=true", out.get("changed") is True)
     status, _, raw = post_json("/preprocess", {"text": "The court ruled. Judgment is final."})
     check("idempotent on already-clean text",

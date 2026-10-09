@@ -205,6 +205,27 @@ DEFAULTS: dict[str, Any] = {
         r"\[S\]": "",
         r"\[R\]": "",
     },
+    # Whole "LawPhil" watermark / OCR garbles the scanner left behind. Unlike
+    # stray_markers these are *literal* strings, not regular expressions, so the
+    # exotic glyphs and ligatures need no escaping. Longest first keeps an outer
+    # garble from being half-eaten by a shorter fragment it contains.
+    "watermark_markers": [
+        "ℒαwρhi৷",
+        "LaW㏗iL",
+        "ᇈWᑭHIL",
+        "1aшphi1",
+        "7!ᕼdMᗄ7",
+        "(awÞhi(",
+        "+3u.7!ydmb7",
+        "+3u.!Ydmb",
+        "£A⩊phi£",
+        "⌊aшΡhi⌊",
+        "⚖ - ℒαɯρhi৷",
+        "1a⍵⍴h!1",
+        "äre||anº•1àw",
+        "têñ.£îhqwâ£",
+        "1äwphï1.ñët",
+    ],
     # Master switches for the optional passes. All default on except name
     # parenthetical stripping, which is deliberately opt-in.
     "formatting_flags": {
@@ -592,27 +613,51 @@ class _LiteralMatcher:
         return "".join(out)
 
 
-def _abbrev_branch(key: str) -> str:
+def _is_acronym(key: str) -> bool:
+    """Whether a key is an all-caps acronym such as "NLRC" or "POEA-SEC"."""
+    letters = [c for c in key if c.isalpha()]
+    return len(letters) >= 2 and all(c.isupper() for c in letters)
+
+
+def _abbrev_branch(key: str, guard_parens: bool = False) -> str:
     """One abbreviation, with boundaries that survive a trailing period.
 
     A leading ``\\b`` is wrong for keys like "G.R." because the last character
     is punctuation and ``\\b`` would then require the following character to be
     a word character. Instead: never match immediately after a word character
     or a period, and never run on into a word character.
+
+    ``guard_parens`` blocks an acronym that sits right after "(", so "(Ca)" is
+    left for the redundant-parenthetical pass to strip instead of expanding into
+    "(Court of Appeals)". It is off when that strip pass is disabled.
     """
     body = re.escape(key)
 
+    # The front-end and desktop app title-case their input, so an all-caps
+    # acronym reaches the cleaner as "Nlrc" or "Poea-Sec". Matching acronyms
+    # case-insensitively - and only acronyms - lets them expand without also
+    # making lowercase keys like "No." fire on ordinary prose.
+    guard = ""
+    if _is_acronym(key):
+        body = f"(?i:{body})"
+        if guard_parens:
+            guard = r"(?<!\()"
+
     # "No." / "Nos." only make sense as a citation marker when a number
-    # follows, which is also what protects "No person shall...".
+    # follows, which is also what protects "No person shall...". The number may
+    # begin with a letter, as in a docket "No. P-12-3091", so the trigger is a
+    # token that ends in a digit, optionally followed by one piece of trailing
+    # punctuation.
     if key in {"No.", "Nos."}:
-        return rf"(?<![A-Za-z0-9.]){body}(?=\s+[0-9])"
+        return (rf"{guard}(?<![A-Za-z0-9.]){body}"
+                rf"(?=\s+(?:[A-Za-z0-9][A-Za-z0-9.\-]*)?[0-9][.,;]?(?=\s|$))")
 
     if key.endswith("."):
-        return rf"(?<![A-Za-z0-9.]){body}(?![A-Za-z0-9])"
+        return rf"{guard}(?<![A-Za-z0-9.]){body}(?![A-Za-z0-9])"
 
     # A bare "CA" must not swallow the "CA-" of "CA-G.R.", and "G.R." must not
     # match inside a longer dotted token.
-    return rf"(?<![A-Za-z0-9.\-]){body}(?![A-Za-z0-9\-])"
+    return rf"{guard}(?<![A-Za-z0-9.\-]){body}(?![A-Za-z0-9\-])"
 
 
 def _parenthetical_branch(key: str) -> str:
@@ -700,9 +745,10 @@ def _combined_entries(config: dict[str, Any]) -> list[tuple[str, str, str]]:
         for key, value in _config_pairs(config.get("parenthetical_strip", {})):
             if isinstance(key, str) and key and isinstance(value, str) and value:
                 entries.append((key, _parenthetical_branch(key), value))
+    strip_parens = flags.get("strip_parentheticals", True)
     for key, value in _config_pairs(config.get("abbreviations", {})):
         if isinstance(key, str) and key and isinstance(value, str) and value:
-            entries.append((key, _abbrev_branch(key), value))
+            entries.append((key, _abbrev_branch(key, strip_parens), value))
 
     # Longest configured key first, so a full form beats the abbreviation it
     # contains whichever section it came from.
@@ -773,6 +819,23 @@ _SINGLE_LETTER_BRACKET = re.compile(r"\\\[\s*[A-Za-z]\s*\\\]")
 _EMPHASIS_MARKERS = re.compile(r"(?<=[^\s*])\*{1,3}|\*{1,3}(?=[^\s*])")
 
 
+def _apply_watermark_markers(text: str, config: dict[str, Any]) -> str:
+    """Delete whole "LawPhil" watermark / OCR garbles, longest string first.
+
+    Entries are matched case-insensitively: the UI and desktop title-case their
+    input, which re-casts the ASCII letters inside a garble (``LaW㏗iL`` arrives
+    as ``Law㏗Il``), so an exact compare would miss it. ``re.escape`` keeps the
+    ligatures and exotic glyphs literal while the inline flag tolerates case.
+    Removing the longest match first stops an outer garble from being reduced to
+    a leftover fragment by a shorter entry it contains.
+    """
+    markers = config.get("watermark_markers", [])
+    literals = [m.strip() for m in markers if isinstance(m, str) and m.strip()]
+    for marker in sorted(literals, key=len, reverse=True):
+        text = re.compile(re.escape(marker), re.IGNORECASE).sub("", text)
+    return text
+
+
 def _apply_stray_markers(text: str, config: dict[str, Any]) -> str:
     """Delete the configured scan artefacts, longest pattern first.
 
@@ -794,6 +857,9 @@ def _apply_stray_markers(text: str, config: dict[str, Any]) -> str:
 
 
 def _step_a(text: str, config: dict[str, Any]) -> str:
+    # Watermarks first: several contain digits that the footnote rules below
+    # would otherwise trim, breaking the whole-string match.
+    text = _apply_watermark_markers(text, config)
     text = _FOOTNOTE_DIGITS.sub("", text)
     text = _FOOTNOTE_DIGITS_AFTER_PERIOD.sub(".", text)
     text = _BRACKETED_REF.sub("", text)
@@ -823,9 +889,28 @@ _NAME_PARENTHETICAL = re.compile(
 _MULTISPACE = re.compile(r"[ \t]{2,}")
 _TRAILING_WS = re.compile(r"[ \t]+$", re.MULTILINE)
 
+# Scanner artifact: a word with a space wedged between every letter, e.g.
+# "D E C I S I O N". Three or more *upper-case* single letters in a row are
+# joined back into one token, which also lets a split acronym like "N L R C"
+# reach the abbreviation pass. Lower-case runs such as a list "a b c d e" and
+# two-letter runs such as "I V" are left alone.
+_SPACED_LETTER_RUN = re.compile(
+    r"(?<![A-Za-z])(?:[A-Z][ \t]+){2,}[A-Z](?![A-Za-z])"
+)
+
+
+def _collapse_spaced_letters(text: str) -> str:
+    """Join runs of space-separated single letters, e.g. "D E C I S I O N"."""
+    def _join(match: re.Match[str]) -> str:
+        return re.sub(r"[ \t]+", "", match.group(0))
+    return _SPACED_LETTER_RUN.sub(_join, text)
+
 
 def _step_b(text: str, config: dict[str, Any]) -> str:
     if config.get("formatting_flags", {}).get("fix_ocr_artifacts", True):
+        # Rejoin letter-spaced words before the OCR map, so a split "N L R C"
+        # also gets the chance to expand.
+        text = _collapse_spaced_letters(text)
         # One scan for every configured OCR fix, not one pass per fix.
         text = _ocr_matcher(config).sub(text)
 
@@ -918,6 +1003,12 @@ def _strip_redundant_parentheticals(text: str) -> str:
     return "".join(out)
 
 
+_DOCKET_GLUE = re.compile(
+    r"\b(Number|Numbers)[ \t]+"
+    r"((?:[A-Za-z0-9][A-Za-z0-9.\-]*)?[0-9][.,;]?)(?=\s|,|;|$)"
+)
+
+
 def _step_c(text: str, config: dict[str, Any]) -> str:
     """Strip parenthetical abbreviations and expand standalone ones (steps 4-5).
 
@@ -927,6 +1018,9 @@ def _step_c(text: str, config: dict[str, Any]) -> str:
     configured map cannot enumerate.
     """
     text = _combined_matcher(config).sub(text)
+    # A citation reads aloud as one unit: "Number 64100" becomes "Number-64100"
+    # so the tail of the docket is not chunked apart by the space.
+    text = _DOCKET_GLUE.sub(r"\1-\2", text)
     if config.get("formatting_flags", {}).get("strip_parentheticals", True):
         text = _strip_redundant_parentheticals(text)
     return text
