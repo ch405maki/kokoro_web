@@ -14,6 +14,8 @@
     "Nos.": "Numbers",
     "vs.": "versus",
     "vs": "versus",
+    "Vs.": "versus",
+    "Vs": "versus",
     "VS.": "versus",
     "VS": "versus",
     "RTC": "Regional Trial Court",
@@ -156,6 +158,7 @@
     "spell_out_percentages": true,
     "strip_name_parentheticals": false,
     "remove_editorial_markers": true,
-    "fix_ocr_artifacts": true
+    "fix_ocr_artifacts": true,
+    "strip_emphasis_markers": true
   }
 }

@@ -35,6 +35,10 @@ bundled_weights/
 build/
 dist/
 
+# Portable build (see build_server.bat) — ~1 GB, regenerated on demand
+Production/
+Production\KokoroServer
+
 # OS
 .DS_Store
 Thumbs.db

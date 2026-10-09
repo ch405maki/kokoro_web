@@ -59,6 +59,16 @@ class TestFootnoteAndMarkerRemoval(unittest.TestCase):
         self.assertEqual(clean("[j]ust [t]he [i]nternet"), "just the internet")
         self.assertEqual(clean("[s] [j] [t] alone"), "alone")
 
+    def test_markdown_emphasis_markers_are_removed(self):
+        self.assertEqual(clean("The **Court** ruled."), "The Court ruled.")
+        self.assertEqual(clean("An *emphasis* here."), "An emphasis here.")
+        self.assertEqual(clean("***bold italic*** text"), "bold italic text")
+        self.assertEqual(clean("a **b** c *d* e"), "a b c d e")
+
+    def test_spaced_asterisks_are_not_treated_as_emphasis(self):
+        # A spaced asterisk reads as a separator/multiplication, not markdown.
+        self.assertEqual(clean("2 * 3 = 6"), "2 * 3 = 6")
+
     def test_real_numbers_are_not_mistaken_for_footnotes(self):
         # Regression: the footnote rule used to delete the ",000.00" tail of an
         # amount, because those digits followed a comma.

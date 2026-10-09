@@ -418,6 +418,12 @@
   var $ = function (id) { return document.getElementById(id); };
   var state = { voice: "af_heart", url: null, name: null, audio: null, busy: false, voices: [] };
 
+  // Front-end-only voice labels. The API keeps receiving the real voice id
+  // (af_heart); this only changes what the chip shows and what the download
+  // fallback filename uses, so the engine is untouched.
+  var VOICE_LABELS = { "af_heart": "af_luna" };
+  function voiceLabel(name) { return VOICE_LABELS[name] || name; }
+
   // Read a response as JSON, but turn a non-JSON body into a readable failure.
   // When the request never reaches the app -- an nginx error page, a proxy's
   // 502/503/504, or a 413 from client_max_body_size -- the body is HTML and
@@ -453,7 +459,8 @@
       var b = document.createElement("button");
       b.className = "vbtn";
       b.type = "button";
-      b.textContent = v.name;
+      b.dataset.voice = v.name;
+      b.textContent = voiceLabel(v.name);
       b.title = v.locale + " / " + v.gender + " / " + v.description;
       b.setAttribute("aria-pressed", String(v.name === state.voice));
       b.addEventListener("click", function () { select(v.name); });
@@ -471,7 +478,7 @@
   function select(name) {
     state.voice = name;
     Array.prototype.forEach.call($("voices").children, function (el) {
-      el.setAttribute("aria-pressed", String(el.textContent === name));
+      el.setAttribute("aria-pressed", String(el.dataset.voice === name));
     });
   }
 
@@ -880,13 +887,13 @@
   }
 
   function downloadName(fmt) {
-    var base = $("title").value.trim() || ("Lawphil-" + timestamp() + "-" + state.voice);
+    var base = $("title").value.trim() || ("Lawphil-" + timestamp() + "-" + voiceLabel(state.voice));
     base = base.replace(/[\\/:*?"<>|]+/g, " ")
                .replace(/\s+/g, " ")
                .replace(/^[. ]+|[. ]+$/g, "")
                .slice(0, 120)
                .trim();
-    if (!base) base = "Lawphil-" + timestamp() + "-" + state.voice;
+    if (!base) base = "Lawphil-" + timestamp() + "-" + voiceLabel(state.voice);
     return base + "." + fmt;
   }
 

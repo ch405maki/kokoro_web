@@ -59,10 +59,14 @@ DEFAULTS: dict[str, Any] = {
         "NLRC Case No.": "NLRC Case Number",
         "No.": "Number",
         "Nos.": "Numbers",
-        # The party separator. All four casings are listed because the combined
-        # matcher is case-sensitive on purpose (so "CA" never matches "ca").
+        # The party separator. Every common casing is listed because the
+        # combined matcher is case-sensitive on purpose (so "CA" never matches
+        # "ca"). "Vs."/"Vs" matter because the web UI and desktop app title-case
+        # their input before cleaning, turning "vs." into "Vs.".
         "vs.": "versus",
         "vs": "versus",
+        "Vs.": "versus",
+        "Vs": "versus",
         "VS.": "versus",
         "VS": "versus",
         "RTC": "Regional Trial Court",
@@ -212,6 +216,7 @@ DEFAULTS: dict[str, Any] = {
         "strip_name_parentheticals": False,
         "remove_editorial_markers": True,
         "fix_ocr_artifacts": True,
+        "strip_emphasis_markers": True,
     },
 }
 
@@ -761,6 +766,12 @@ _BRACKETED_REF = re.compile(r"\[\s*[0-9\u00b9\u00b2\u00b3]{1,4}\s*\]")
 # amputated word.
 _SINGLE_LETTER_BRACKET = re.compile(r"\\\[\s*[A-Za-z]\s*\\\]")
 
+# Markdown emphasis: "**bold**" and "*italic*" would otherwise be read aloud as
+# "asterisk asterisk ...". A run of one to three asterisks is dropped when it
+# touches a non-space character on either side, which is what tells an emphasis
+# marker apart from a spaced separator such as "2 * 3 = 6".
+_EMPHASIS_MARKERS = re.compile(r"(?<=[^\s*])\*{1,3}|\*{1,3}(?=[^\s*])")
+
 
 def _apply_stray_markers(text: str, config: dict[str, Any]) -> str:
     """Delete the configured scan artefacts, longest pattern first.
@@ -786,6 +797,8 @@ def _step_a(text: str, config: dict[str, Any]) -> str:
     text = _FOOTNOTE_DIGITS.sub("", text)
     text = _FOOTNOTE_DIGITS_AFTER_PERIOD.sub(".", text)
     text = _BRACKETED_REF.sub("", text)
+    if config.get("formatting_flags", {}).get("strip_emphasis_markers", True):
+        text = _EMPHASIS_MARKERS.sub("", text)
     text = _apply_stray_markers(text, config)
     if config.get("formatting_flags", {}).get("remove_editorial_markers", True):
         text = _editorial_matcher(config).sub(text)
