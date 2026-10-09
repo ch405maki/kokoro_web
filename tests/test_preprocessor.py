@@ -180,6 +180,20 @@ class TestAbbreviations(unittest.TestCase):
         )
         self.assertEqual(clean("the CA ruled"), "the Court of Appeals ruled")
 
+    def test_party_separator_vs_expands_to_versus(self):
+        self.assertEqual(clean("People vs. Santos"), "People versus Santos")
+        self.assertEqual(clean("People vs Santos"), "People versus Santos")
+        # OCR and headings often leave the separator in caps.
+        self.assertEqual(clean("People VS. Santos"), "People versus Santos")
+        self.assertEqual(clean("CA vs. NLRC"), "Court of Appeals versus National Labor Relations Commission")
+        # Only the whole token counts: "vs" inside a word must survive.
+        self.assertEqual(clean("the canvas"), "the canvas")
+
+    def test_single_letter_v_is_left_alone(self):
+        # "v." also spells a Roman numeral ("V. CONCLUSION"), so it is
+        # deliberately not in the map.
+        self.assertEqual(clean("People v. Santos"), "People v. Santos")
+
     def test_no_is_only_a_citation_marker_before_a_number(self):
         self.assertEqual(clean("No person shall do this"), "No person shall do this")
 
@@ -319,6 +333,11 @@ class TestConfig(unittest.TestCase):
         config = lp.load_config(reload=True)
         self.assertEqual(config["abbreviations"]["No."], "Number")
         self.assertEqual(config["currency_map"]["USD"], "United States Dollars")
+        # The shipped config and the built-in defaults must agree on the party
+        # separator, so deleting config.json does not silently drop it.
+        for key in ("vs.", "vs", "VS.", "VS"):
+            self.assertEqual(config["abbreviations"][key], "versus")
+            self.assertEqual(lp.DEFAULTS["abbreviations"][key], "versus")
         raw = Path(__file__).resolve().parents[1] / "config.json"
         self.assertTrue(raw.is_file(), "config.json should ship with the repo")
         json.loads(raw.read_text(encoding="utf-8"))

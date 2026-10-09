@@ -170,6 +170,14 @@ class TestFormatting(unittest.TestCase):
         self.assertEqual(controller.format_text("Court of Appeals (CA) ruled.").strip(),
                          "Court of Appeals Ruled.")
 
+    def test_default_format_text_expands_the_party_separator(self):
+        # Auto-Format must spell "vs."/"vs" out to "versus" for the reader.
+        controller = SynthesisController(engine_module=_StubEngine())
+        self.assertEqual(controller.format_text("People vs. Santos").strip(),
+                         "People Versus Santos")
+        self.assertEqual(controller.format_text("People VS Santos").strip(),
+                         "People Versus Santos")
+
 
 class TestStandardStreams(unittest.TestCase):
     """Windowed builds have None streams; kokoro's loguru setup rejects that."""

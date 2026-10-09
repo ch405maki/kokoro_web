@@ -59,6 +59,12 @@ DEFAULTS: dict[str, Any] = {
         "NLRC Case No.": "NLRC Case Number",
         "No.": "Number",
         "Nos.": "Numbers",
+        # The party separator. All four casings are listed because the combined
+        # matcher is case-sensitive on purpose (so "CA" never matches "ca").
+        "vs.": "versus",
+        "vs": "versus",
+        "VS.": "versus",
+        "VS": "versus",
         "RTC": "Regional Trial Court",
         "CA": "Court of Appeals",
         "NLRC": "National Labor Relations Commission",

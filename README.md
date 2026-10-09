@@ -213,7 +213,7 @@ things, in order:
 | 2 | Repairs OCR damage and collapses runs of spaces | `prope1iies` → `properties`, `1s` → `is`, `[j]ust` → `just` |
 | 3 | Removes editorial markers | `(Emphasis supplied)`, `(Citations omitted)` |
 | 4 | Drops a redundant parenthetical (a configured pair, a repeated token, or the initials of what precedes it) | `Court of Appeals (CA)` → `Court of Appeals`, `Juadines (Juadines)` → `Juadines` |
-| 5 | Expands remaining standalone abbreviations | `CA` → `Court of Appeals`, `G.R. No.` → `G.R. Number` |
+| 5 | Expands remaining standalone abbreviations | `CA` → `Court of Appeals`, `G.R. No.` → `G.R. Number`, `vs.`/`vs` → `versus` |
 | 6 | Expands corporate and honorific suffixes | `Inc.` → `Incorporated`, `Capt.` → `Captain` |
 | 7 | Spells out currency amounts | `PHP 91,575.65` → `Ninety-One Thousand Five Hundred Seventy-Five Pesos and Sixty-Five Centavos` |
 | 8 | Spells out percentages | `10%` → `ten percent` |
@@ -231,11 +231,14 @@ a contiguous run of the preceding capitalised words (`The Supreme Court (SC)`,
 role tags (`(petitioner)`) are deliberately left alone. After the abbreviations,
 corporate and honorific suffixes are expanded in a second pass.
 
-Three deliberate limits: a `No.` is only read as a citation marker when a number
+Four deliberate limits: a `No.` is only read as a citation marker when a number
 follows, so `No person shall...` is untouched; text inside `>` blockquotes or
 double quotes is reproduced byte for byte, because a quoted passage is often
-being read aloud as written; and a single bracketed letter (`[j]ust`) is a drop
-cap to repair rather than a stray marker to delete.
+being read aloud as written; a single bracketed letter (`[j]ust`) is a drop
+cap to repair rather than a stray marker to delete; and the single-letter `v.`
+is left as written even though it also separates parties, because it doubles as
+a Roman numeral heading (`V. CONCLUSION`) and only the unambiguous `vs.`/`vs`
+is expanded to `versus`.
 
 Mappings live in `config.json` at the repo root, so you can retune them without
 touching the code. It is parsed once at startup; if it is missing or malformed
