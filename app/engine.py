@@ -32,6 +32,10 @@ SAMPLE_RATE = 24000
 DEFAULT_VOICE = os.getenv("KOKORO_DEFAULT_VOICE", "af_heart")
 DEFAULT_LANG = os.getenv("KOKORO_DEFAULT_LANG", "a")
 
+# Spoken at the very start of every synthesis so exported audio is branded.
+# Set KOKORO_INTRO to "" to disable it.
+INTRO_LINE = os.getenv("KOKORO_INTRO", "The LawPhil Project.")
+
 # MP3 encoder bitrate. The output is 24 kHz mono speech, so the old 192k default
 # was pure waste: MP3 is a perceptual codec, and above ~96k there is nothing left
 # to hear in a single voice on a narrow band. 96k is the knee of the curve here,
@@ -245,6 +249,8 @@ class KokoroEngine:
     ) -> list[Synthesized]:
         if not text or not text.strip():
             raise ValueError("text must not be empty")
+        if INTRO_LINE.strip():
+            text = f"{INTRO_LINE.strip()} {text.lstrip()}"
         lang_code = resolve_lang_code(voice)
         if lang_code not in available_lang_codes():
             raise UnsupportedLanguage(

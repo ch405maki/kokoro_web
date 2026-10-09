@@ -106,7 +106,7 @@
   }
   .help { font-size: 12.5px; color: var(--text-3); margin: 7px 0 0; }
 
-  textarea, input[type="range"], select {
+  textarea, input[type="text"], input[type="range"], select {
     font-family: inherit; font-size: 14px; color: var(--text);
     background: var(--surface); border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm); padding: 11px 13px;
@@ -307,6 +307,10 @@
 
     <!-- ============ LEFT: text input ============ -->
     <div class="col">
+      <fieldset>
+        <label class="label" for="title">Title</label>
+        <input type="text" id="title" placeholder="Title of the decision or document" autocomplete="off" spellcheck="false" />
+      </fieldset>
       <fieldset class="grow">
         <div class="text-head">
           <label class="label" for="text">Text to speak</label>
@@ -799,7 +803,7 @@
     var fmt = $("format").value;
     if (state.url) URL.revokeObjectURL(state.url);
     state.url = URL.createObjectURL(blob);
-    state.name = "kokoro-" + state.voice + "." + fmt;
+    state.name = downloadName(fmt);
 
     var audio = $("audio");
     audio.src = state.url;
@@ -863,10 +867,33 @@
   }
 
   // ---------- download ----------
+  // The saved file is named after the Title field. When it is left blank the
+  // fallback is Lawphil-<date>-<time>-<voice>, so every export is unique and
+  // stays identifiable. Characters that are illegal in Windows/macOS filenames
+  // are collapsed so the browser does not silently rename the file, and the
+  // length is capped so the extension always fits.
+  function timestamp() {
+    var d = new Date();
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "-" +
+           p(d.getHours()) + "-" + p(d.getMinutes()) + "-" + p(d.getSeconds());
+  }
+
+  function downloadName(fmt) {
+    var base = $("title").value.trim() || ("Lawphil-" + timestamp() + "-" + state.voice);
+    base = base.replace(/[\\/:*?"<>|]+/g, " ")
+               .replace(/\s+/g, " ")
+               .replace(/^[. ]+|[. ]+$/g, "")
+               .slice(0, 120)
+               .trim();
+    if (!base) base = "Lawphil-" + timestamp() + "-" + state.voice;
+    return base + "." + fmt;
+  }
+
   $("download").addEventListener("click", function () {
     if (!state.url) return;
     var a = document.createElement("a");
-    a.href = state.url; a.download = state.name; a.click();
+    a.href = state.url; a.download = downloadName($("format").value); a.click();
   });
 })();
 </script>
