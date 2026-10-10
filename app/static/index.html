@@ -80,6 +80,7 @@
   }
   .brand .sub { color: var(--text-3); font-size: 13px; font-family: var(--mono); }
   .status { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+  .masthead-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex: none; }
   .dot[data-state="ready"] { background: var(--accent); }
   .dot[data-state="loading"] { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
@@ -212,6 +213,26 @@
   .vbtn:active { transform: translateY(1px); }
   .vbtn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 
+  /* ---------- formatting rules ---------- */
+  .rule-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .rulesets { margin-top: 4px; }
+  .ruleset-title { margin: 12px 0 6px; }
+  .rule-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border: 1px solid var(--line);
+    border-radius: var(--radius-sm); background: var(--surface);
+    margin-bottom: 6px;
+  }
+  .rule-row .rule-text {
+    flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    font-size: 13px; white-space: nowrap; font-family: var(--mono);
+  }
+  .rule-tag {
+    flex: none; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--text-3); border: 1px solid var(--line-strong); border-radius: 999px; padding: 1px 7px;
+  }
+  .rule-row .btn { flex: none; padding: 4px 8px; }
+
   /* ---------- banner ---------- */
   .banner {
     display: none; gap: 10px; align-items: flex-start;
@@ -222,6 +243,24 @@
   .banner.show { display: flex; }
   .banner i { font-size: 17px; flex: none; margin-top: 1px; }
   .banner code { font-family: var(--mono); font-size: 12.5px; }
+
+  /* ---------- settings modal ---------- */
+  .modal-backdrop {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 48px 20px; overflow-y: auto;
+    background: rgba(0, 0, 0, .45);
+  }
+  .modal-backdrop[hidden] { display: none; }
+  .modal {
+    width: min(560px, 100%);
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    padding: 22px; box-shadow: 0 20px 50px rgba(0, 0, 0, .25);
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+  .modal-head h2 { font-size: 17px; font-weight: 620; letter-spacing: -0.01em; margin: 0; }
+  #rulesMsg { color: var(--accent); }
 
   /* ---------- progress + timer ---------- */
   /* The Generate button turns into this while synthesis runs, so there is one
@@ -292,9 +331,15 @@
       <img class="logo" src="/static/lawphil-logo.webp" alt="LawPhil logo" width="34" height="34" />
       <h1>LawPhil TTS Studio</h1>
     </div>
-    <div class="status">
-      <span class="dot" id="dot" data-state="idle" aria-hidden="true"></span>
-      <span id="statusText">checking engine</span>
+    <div class="masthead-actions">
+      <div class="status">
+        <span class="dot" id="dot" data-state="idle" aria-hidden="true"></span>
+        <span id="statusText">checking engine</span>
+      </div>
+      <button class="btn ghost sm" id="settingsBtn" type="button" aria-expanded="false"
+              title="Settings: cleaner rules and output size">
+        <i class="ph ph-gear-six" aria-hidden="true"></i> <span>Settings</span>
+      </button>
     </div>
   </header>
 
@@ -368,7 +413,9 @@
           <div>
             <label class="label" for="format">Format</label>
             <select id="format">
-              <option value="mp3" selected>MP3 &middot; 96 kbps</option>
+              <option value="mp3@48" selected>MP3 &middot; 48 kbps (small)</option>
+              <option value="mp3@96">MP3 &middot; 96 kbps</option>
+              <option value="mp3@128">MP3 &middot; 128 kbps</option>
               <option value="wav">WAV &middot; 24 kHz PCM</option>
             </select>
           </div>
@@ -410,6 +457,52 @@
     <a href="/health">/health</a>
     <a href="/voices">/voices</a>
   </footer>
+</div>
+
+<div class="modal-backdrop" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="settingsTitle">Settings</h2>
+      <button class="btn ghost sm" id="settingsClose" type="button" title="Close settings">
+        <i class="ph ph-x" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <fieldset>
+      <label class="label">Formatting rules</label>
+      <p class="help" style="margin-top:0">
+        Add words to the cleaner: an abbreviation to spell out, or an OCR / watermark
+        garble to remove. Saved to <code>config.json</code> in the server folder and
+        applied immediately.
+      </p>
+      <div class="row two">
+        <div>
+          <label class="label" for="ruleAbv" style="margin:0">Abbreviation</label>
+          <input type="text" id="ruleAbv" placeholder="e.g. MEPO" autocomplete="off" spellcheck="false" />
+        </div>
+        <div>
+          <label class="label" for="ruleFull" style="margin:0">Expands to</label>
+          <input type="text" id="ruleFull" placeholder="e.g. Mandaluyong East Police Office" autocomplete="off" spellcheck="false" />
+        </div>
+      </div>
+      <p class="help" style="margin:8px 0 0">
+        <button class="btn ghost sm" id="ruleAddAbv" type="button">
+          <i class="ph ph-plus" aria-hidden="true"></i> <span>Add abbreviation</span>
+        </button>
+      </p>
+      <div style="margin-top:14px">
+        <label class="label" for="ruleWord" style="margin:0">Word to auto-remove</label>
+        <input type="text" id="ruleWord" placeholder="e.g. 1aшphi1" autocomplete="off" spellcheck="false" />
+      </div>
+      <p class="help" style="margin:8px 0 0">
+        <button class="btn ghost sm" id="ruleAddWord" type="button">
+          <i class="ph ph-plus" aria-hidden="true"></i> <span>Add auto-remove word</span>
+        </button>
+      </p>
+      <div class="rulesets" id="ruleList"></div>
+      <p class="help" id="rulesMsg" aria-live="polite"></p>
+    </fieldset>
+  </div>
 </div>
 
 <script>
@@ -647,6 +740,158 @@
     $("banner").classList.add("show");
   }
 
+  // ---------- formatting rules ----------
+  // The cleaner's mappings live in config.json beside the server. These
+  // controls let someone add an abbreviation→expansion or a word that is
+  // auto-removed without hand-editing that file; the server persists it and
+  // reloads, so the very next Auto-Format pass picks it up.
+  function rulesMsg(msg) {
+    $("rulesMsg").textContent = msg;
+  }
+
+  function ruleRow(kind, label, builtin, onRemove) {
+    var row = document.createElement("div");
+    row.className = "rule-row";
+    var text = document.createElement("span");
+    text.className = "rule-text";
+    text.textContent = label;
+    text.title = label;
+    row.appendChild(text);
+    if (builtin) {
+      var tag = document.createElement("span");
+      tag.className = "rule-tag";
+      tag.textContent = "built-in";
+      row.appendChild(tag);
+    }
+    var rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "btn ghost sm";
+    rm.title = "Remove" + (builtin ? " (built-in rules are kept in the code)" : "");
+    rm.innerHTML = '<i class="ph ph-trash" aria-hidden="true"></i>';
+    rm.addEventListener("click", function () {
+      rm.classList.add("busy");
+      rm.disabled = true;
+      onRemove()
+        .then(function () { rulesMsg(""); })
+        .catch(function (e) {
+          rulesMsg("Could not remove rule: " + String(e.message || e).replace(/</g, "&lt;"));
+        })
+        .finally(function () { rm.classList.remove("busy"); rm.disabled = false; });
+    });
+    row.appendChild(rm);
+    return row;
+  }
+
+  function renderRules(data) {
+    var box = $("ruleList");
+    box.textContent = "";
+    var groups = [
+      ["Abbreviations", "abbreviations", data.abbreviations || [],
+        function (r) { return r.abbreviation + " \u2192 " + r.full; },
+        function (r) {
+          return mutateRules("/rules/abbreviations/remove", { abbreviation: r.abbreviation });
+        }],
+      ["Auto-remove words", "removals", data.removals || [],
+        function (r) { return r.word; },
+        function (r) {
+          return mutateRules("/rules/removals/remove", { word: r.word });
+        }]
+    ];
+    var any = false;
+    groups.forEach(function (g) {
+      if (!g[2].length) return;
+      any = true;
+      var title = document.createElement("p");
+      title.className = "label ruleset-title";
+      title.textContent = g[0];
+      box.appendChild(title);
+      g[2].forEach(function (r) {
+        box.appendChild(ruleRow(g[1], g[3](r), r.builtin, function () { return g[4](r); }));
+      });
+    });
+    if (!any) {
+      var empty = document.createElement("p");
+      empty.className = "help";
+      empty.textContent = "No rules yet. Add one above and it applies on the next Auto-Format.";
+      box.appendChild(empty);
+    }
+  }
+
+  function mutateRules(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(readJSON).then(function (j) {
+      renderRules(j);
+      return j;
+    });
+  }
+
+  function addAbvRule() {
+    var abv = $("ruleAbv").value.trim();
+    var full = $("ruleFull").value.trim();
+    if (!abv || !full) { rulesMsg("Enter both the abbreviation and what it spells out."); return; }
+    var btn = $("ruleAddAbv");
+    btn.classList.add("busy"); btn.disabled = true;
+    mutateRules("/rules/abbreviations", { abbreviation: abv, full: full })
+      .then(function () { $("ruleAbv").value = ""; $("ruleFull").value = ""; rulesMsg(""); })
+      .catch(function (e) {
+        rulesMsg("Could not save abbreviation: " + String(e.message || e).replace(/</g, "&lt;"));
+      })
+      .finally(function () { btn.classList.remove("busy"); btn.disabled = false; });
+  }
+
+  function addWordRule() {
+    var word = $("ruleWord").value.trim();
+    if (!word) { rulesMsg("Enter the word or garble to auto-remove."); return; }
+    var btn = $("ruleAddWord");
+    btn.classList.add("busy"); btn.disabled = true;
+    mutateRules("/rules/removals", { word: word })
+      .then(function () { $("ruleWord").value = ""; rulesMsg(""); })
+      .catch(function (e) {
+        rulesMsg("Could not save auto-remove word: " + String(e.message || e).replace(/</g, "&lt;"));
+      })
+      .finally(function () { btn.classList.remove("busy"); btn.disabled = false; });
+  }
+
+  $("ruleAddAbv").addEventListener("click", addAbvRule);
+  $("ruleAddWord").addEventListener("click", addWordRule);
+  // Enter in any of the three rule inputs submits the matching form.
+  $("ruleAbv").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); $("ruleFull").focus(); }
+  });
+  $("ruleFull").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); addAbvRule(); }
+  });
+  $("ruleWord").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); addWordRule(); }
+  });
+  fetch("/rules").then(readJSON).then(renderRules)
+    .catch(function () { /* rules panel stays empty if the endpoint is missing */ });
+
+  // Settings modal. Opening it also refreshes the rule list so an edit made
+  // through another tab shows up here. Focus lands on the first field, Esc and
+  // a backdrop click close without touching the page beneath.
+  function openSettings() {
+    $("settingsModal").hidden = false;
+    $("settingsBtn").setAttribute("aria-expanded", "true");
+    fetch("/rules").then(readJSON).then(renderRules).catch(function () {});
+    $("ruleAbv").focus();
+  }
+  function closeSettings() {
+    $("settingsModal").hidden = true;
+    $("settingsBtn").setAttribute("aria-expanded", "false");
+  }
+  $("settingsBtn").addEventListener("click", openSettings);
+  $("settingsClose").addEventListener("click", closeSettings);
+  $("settingsModal").addEventListener("click", function (e) {
+    if (e.target === $("settingsModal")) closeSettings();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !$("settingsModal").hidden) closeSettings();
+  });
+
   // ---------- progress + elapsed timer ----------
   // The server cannot report fractional progress, so the bar is indeterminate
   // and the timer carries the information that matters: how long this actually
@@ -753,13 +998,17 @@
     // One call to /speak/meta so the audio and the server's own synthesis
     // timing come from the same pass. Asking /speak as well would double the
     // work, since synthesis is the expensive part.
+    // The format select packs an optional MP3 bitrate onto the value
+    // ("mp3@48"); split it so the API gets format and bitrate separately.
+    var fmtBits = $("format").value.split("@");
     var payload = {
       text: text,
       voice: state.voice,
       speed: parseFloat($("speed").value),
-      format: $("format").value,
+      format: fmtBits[0],
       gap: parseFloat($("gap").value)
     };
+    if (fmtBits[1]) payload.bitrate = fmtBits[1] + "k";
 
     var t0 = performance.now();
     fetch("/speak/meta", {
@@ -894,7 +1143,10 @@
                .slice(0, 120)
                .trim();
     if (!base) base = "Lawphil-" + timestamp() + "-" + voiceLabel(state.voice);
-    return base + "." + fmt;
+    // The format select packs the MP3 bitrate onto the value ("mp3@48"); the
+    // saved file should carry just the real extension ("...mp3"), not the tag.
+    var ext = String(fmt).split("@")[0];
+    return base + "." + ext;
   }
 
   $("download").addEventListener("click", function () {

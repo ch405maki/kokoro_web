@@ -26,6 +26,9 @@ hiddenimports = [
     "app.server",
     "app.engine",
     "app.weights",
+    # The multi-worker launcher and the string it hands to uvicorn; the worker
+    # processes import "app.server" by name out of this bundle.
+    "app.launcher",
     "legal_preprocessor",
 ]
 

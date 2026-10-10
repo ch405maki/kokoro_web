@@ -28,6 +28,17 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 #Environment=HF_HUB_OFFLINE=1
 
 # --- runtime --------------------------------------------------------------
+# One worker serves one request at a time. --workers N lets N requests run at
+# once, but only where the CPU can back it and every worker is another ~1.3 GB
+# resident, so raise MemoryMax above with it. torch sizes its thread pool from
+# the CPU count, so if you do raise it, divide KOKORO_THREADS by the same
+# number - app/launcher.py does that automatically for the Windows builds.
+#
+#   Environment=KOKORO_THREADS=2
+#   --workers 4   (with MemoryMax=8G)
+#
+# Measured on 16 CPUs: four concurrent requests, 29.7 s on one worker against
+# 20.9 s on four. A single request does not get faster either way.
 EnvironmentFile=-/etc/kokoro/tts.env
 ExecStart=/opt/kokoro/.venv/bin/uvicorn app.server:app \
     --host 127.0.0.1 \

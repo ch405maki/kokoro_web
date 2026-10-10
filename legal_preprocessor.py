@@ -34,11 +34,23 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-__all__ = ["preprocess_legal_text", "number_to_words", "load_config", "DEFAULTS"]
+__all__ = [
+    "preprocess_legal_text",
+    "number_to_words",
+    "load_config",
+    "save_config",
+    "config_path",
+    "add_abbreviation",
+    "remove_abbreviation",
+    "add_watermark",
+    "remove_watermark",
+    "DEFAULTS",
+]
 
 # --------------------------------------------------------------------------- #
 # Defaults. Used when config.json is absent or incomplete, so a missing or
@@ -313,6 +325,195 @@ def load_config(reload: bool = False) -> dict[str, Any]:
             _CONFIG_MISSING_REPORTED = True
         _CONFIG_CACHE = merged
         return merged
+
+
+def config_path() -> Path | None:
+    """The config.json that would be read, or None when nobody has created one.
+
+    Mirrors ``_config_candidates`` so the read path and the write path agree
+    on which file is authoritative.
+    """
+    for path in _config_candidates():
+        if path.is_file():
+            return path
+    return None
+
+
+def _default_config_path() -> Path:
+    """Where a new config.json is created when none exists yet.
+
+    Source runs own the file beside the module; the frozen server writes next
+    to the executable. In the server bundle ``here`` is ``_internal`` and the
+    build script places the editable config.json one level up.
+    """
+    here = Path(__file__).resolve().parent
+    if getattr(sys, "frozen", False):
+        return here.parent / "config.json"
+    return here / "config.json"
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
+    # Write to a sibling temp file and rename over the target so a crash in the
+    # middle can never leave a truncated config.json behind.
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
+        handle.write(_json_with_section_blanks(data))
+    tmp.replace(path)
+
+
+def _json_with_section_blanks(data: dict[str, Any]) -> str:
+    """json.dump output with a blank line between top-level sections.
+
+    The checked-in config.json uses a blank line to separate each mapping, and
+    a bare ``json.dump`` would strip them, showing every rule edit as a whole-
+    file diff. Re-insert them so a rewrite keeps the hand-written layout.
+    """
+    body = json.dumps(data, ensure_ascii=False, indent=2)
+    lines: list[str] = []
+    first_section = True
+    for line in body.splitlines():
+        if re.match(r'^  "[A-Za-z_][A-Za-z0-9_]*":', line):
+            if not first_section:
+                lines.append("")
+            first_section = False
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def save_config(mutator: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    """Apply *mutator* to config.json, persist it and reload the rules.
+
+    The mutator runs on the raw file contents (an empty dict when the file is
+    missing or broken) under the same lock the reader uses, so a concurrent
+    load never sees a half-written file. ``_comment`` and any unknown top-level
+    keys are left untouched. Returns the freshly merged config, ready to hand
+    back to the caller as-is.
+    """
+    with _CONFIG_LOCK:
+        path = config_path() or _default_config_path()
+        data = _read_json(path)
+        mutator(data)
+        _write_json_atomic(path, data)
+    return load_config(reload=True)
+
+
+def _validate_rule_text(value: str) -> str:
+    if not value:
+        raise ValueError("Rule text must not be empty.")
+    if len(value) > 200:
+        raise ValueError("Rule text is too long (max 200 characters).")
+    if any(ord(c) < 32 for c in value):
+        raise ValueError("Rule text must not contain control characters.")
+    return value
+
+
+def _abbreviation_map(config: dict[str, Any]) -> dict[str, Any]:
+    value = config.get("abbreviations", {})
+    return value if isinstance(value, dict) else {}
+
+
+def _watermark_list(config: dict[str, Any]) -> list[str]:
+    value = config.get("watermark_markers", [])
+    if not isinstance(value, list):
+        return []
+    return [m for m in value if isinstance(m, str) and m.strip()]
+
+
+def add_abbreviation(abbreviation: str, full: str) -> dict[str, Any]:
+    """Persist an abbreviation → expansion and return the merged config.
+
+    The abbreviation becomes active immediately: the combined matcher sorts
+    entries longest-first and builds its branches from the reloaded config, so
+    no restart is needed. Only the new key is written; built-in entries live on
+    in DEFAULTS.
+    """
+    abv = _validate_rule_text(abbreviation.strip())
+    expansion = _validate_rule_text(full.strip())
+    if abv.startswith("_"):
+        raise ValueError("Abbreviations starting with '_' are reserved.")
+    merged = load_config()
+    if _abbreviation_map(merged).get(abv) == expansion:
+        return merged
+
+    def commit(data: dict[str, Any]) -> None:
+        mapping = data.get("abbreviations", {})
+        if not isinstance(mapping, dict):
+            mapping = {}
+        mapping[abv] = expansion
+        data["abbreviations"] = mapping
+
+    return save_config(commit)
+
+
+def remove_abbreviation(abbreviation: str) -> dict[str, Any]:
+    """Make an abbreviation stop firing and return the merged config.
+
+    User-added entries are deleted outright. A built-in default cannot be
+    deleted (the config merge would restore it), so it is disabled with an
+    empty expansion, which every matcher filters out.
+    """
+    abv = _validate_rule_text(abbreviation.strip())
+    merged = load_config()
+    mapping = _abbreviation_map(merged)
+    existing = mapping.get(abv)
+    if abv not in mapping or existing in ("", None):
+        return merged
+
+    def commit(data: dict[str, Any]) -> None:
+        target = data.get("abbreviations", {})
+        if not isinstance(target, dict):
+            target = {}
+        if abv in DEFAULTS.get("abbreviations", {}):
+            target[abv] = ""
+        else:
+            target.pop(abv, None)
+        data["abbreviations"] = target
+
+    return save_config(commit)
+
+
+def add_watermark(word: str) -> dict[str, Any]:
+    """Persist a word/garble to auto-remove and return the merged config.
+
+    Words are stripped case-insensitively anywhere in the document, so a pasted
+    OCR watermark arrives clean on the next formatting pass. List semantics mean
+    the whole list (built-ins plus customs) is written back.
+    """
+    marker = _validate_rule_text(word.strip())
+    merged = load_config()
+    markers = _watermark_list(merged)
+    if marker in markers:
+        return merged
+    markers.append(marker)
+
+    def commit(data: dict[str, Any]) -> None:
+        data["watermark_markers"] = markers
+
+    return save_config(commit)
+
+
+def remove_watermark(word: str) -> dict[str, Any]:
+    """Stop auto-removing a word and return the merged config."""
+    marker = _validate_rule_text(word.strip())
+    merged = load_config()
+    markers = _watermark_list(merged)
+    if marker not in markers:
+        return merged
+    markers = [m for m in markers if m != marker]
+
+    def commit(data: dict[str, Any]) -> None:
+        data["watermark_markers"] = markers
+
+    return save_config(commit)
 
 
 # --------------------------------------------------------------------------- #

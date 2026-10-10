@@ -172,8 +172,10 @@ or per request with `bitrate`.
 web UI all call it, so they cannot drift apart. `KokoroEngine` caches one
 `KPipeline` per language and serialises synthesis behind a lock, because the
 underlying generator is not re-entrant and concurrent requests would corrupt audio.
-**The service handles one request at a time.** That is fine up to a few concurrent
-users; see [Scaling up](#scaling-up).
+**Each worker handles one request at a time**, so one worker is fine for a single
+user and `KOKORO_WORKERS` starts more processes for a few people at once; see
+[Scaling up](#scaling-up). `app/launcher.py` is the only place that decides how
+many processes to start.
 
 ---
 
@@ -335,6 +337,24 @@ ignores surrounding whitespace, so a tidy document is not reported as edited
 just because the response ends with a newline. See
 [Auto-Format for legal text](#auto-format-for-legal-text) for what it changes.
 
+#### `GET/POST /rules` — edit the cleaner's mappings from the app
+
+The web UI's **Settings** button (masthead) opens a modal for adding an
+abbreviation → its spell-out, or a word/garble to auto-remove,
+without hand-editing `config.json`. The server persists the change and reloads,
+so the next Auto-Format pass applies it. `GET /rules` lists the effective rules
+(each flagged `builtin`), and the POSTs mutate them:
+
+| Endpoint | Body | Effect |
+|---|---|---|
+| `POST /rules/abbreviations` | `{"abbreviation","full"}` | add/replace an abbreviation |
+| `POST /rules/abbreviations/remove` | `{"abbreviation"}` | delete a user rule; disable a built-in |
+| `POST /rules/removals` | `{"word"}` | add a case-insensitive auto-removal word |
+| `POST /rules/removals/remove` | `{"word"}` | stop auto-removing a word |
+
+Writes go to the same `config.json` that the cleaner reads (atomic rename), so the
+file stays the single readable source of truth.
+
 #### `POST /speak` — the main endpoint
 
 Returns raw audio bytes.
@@ -481,11 +501,17 @@ Or call the module directly, which is what the batch file wraps:
 run_server.bat                                # terminal 1
 .venv\Scripts\python.exe tests\test_api.py   # terminal 2
 
-# preprocessor suite: 75 tests, no server needed
+# preprocessor suite: 85 tests, no server needed
 .venv\Scripts\python.exe -m unittest tests.test_preprocessor -v
+
+# config.json rule-editing helpers: 17 tests, no server needed
+.venv\Scripts\python.exe -m unittest tests.test_config_store -v
 
 # desktop app logic: no GUI/torch/display needed
 .venv\Scripts\python.exe -m unittest tests.test_desktop -v
+
+# multi-worker launcher: 22 tests, no server needed
+.venv\Scripts\python.exe -m unittest tests.test_launcher -v
 
 # throughput table
 .venv\Scripts\python.exe tests\bench.py
@@ -501,9 +527,13 @@ Set `PYTHONIOENCODING=utf-8` first. The console defaults to cp1252 on Windows an
 the suite prints IPA, and will die with `UnicodeEncodeError` partway through
 otherwise.
 
-Latest run on this machine: **64/64 API checks and 75/75 preprocessor tests
-passed.** The API suite covers every endpoint, speed and voice differentiation,
-WAV header parsing, chunk splitting, MP3 encoding, path-traversal rejection, the
+Latest run on this machine: **64/64 API checks, 85/85 preprocessor tests, 17/17
+config-store tests, 26/26 desktop tests and 22/22 launcher tests
+passed.** The API suite was run against a
+**two-worker** server, which is also how it checks that nothing about the
+endpoints depends on there being exactly one process. It covers every endpoint,
+speed and voice differentiation, WAV header parsing, chunk splitting, MP3
+encoding, path-traversal rejection, the
 unavailable-language-pack path, and `POST /preprocess`. It
 also asserts the auth posture (off by default) and that `gap` genuinely inserts
 silence: two renders of the same multi-chunk text are compared and the difference
@@ -622,9 +652,10 @@ deployment, leave the key unset and gate the site with HTTP Basic auth at a reve
 proxy instead - see `DEPLOY.md`, which has a ready nginx config that does exactly
 this and also rate limits per client IP.
 
-Rate limiting is not built in. Synthesis is CPU-bound and single-worker, so one
-caller can queue the server for everyone else; put nginx or a rate-limit-aware proxy
-in front if the port is not on a trusted network.
+Rate limiting is not built in. Synthesis is CPU-bound and serialised per worker,
+so one caller can queue a worker for everyone else; start more workers (see
+[Scaling up](#scaling-up)) and put nginx or a rate-limit-aware proxy in front if
+the port is not on a trusted network.
 
 #### Two things that break a systemd deployment silently
 
@@ -654,16 +685,51 @@ Note 8082 already ships as `us_cli_port_t`, so that one needs `-m`, not `-a`.
 
 ### Scaling up
 
-Synthesis is serialised behind one lock, so requests queue rather than run
-concurrently. That is the right trade for a single user. For real concurrency,
-run several processes under a load balancer:
+Synthesis is serialised behind one lock, so within one process requests queue
+rather than run concurrently. That is the right trade for a single user. For a
+few people at once, start more workers - one process each:
 
 ```powershell
-uvicorn app.server:app --host 0.0.0.0 --port 8001 --workers 2
+run_server.bat 8000 127.0.0.1 4      # port, host, workers
 ```
 
-Each worker loads its own copy of the weights (~330 MB RAM) so size the box
-accordingly.
+`KOKORO_WORKERS` sets the same thing, the frozen
+`Start Kokoro TTS.bat` takes it as a second argument, and an explicit
+`KOKORO_THREADS` still wins over the automatic split.
+
+**What it buys, measured on this machine (16 CPUs), four concurrent requests of
+about 7.5 s each:**
+
+| workers | 4 requests, wall clock | vs one worker |
+|---|---|---|
+| 1 | 29.7 s | — |
+| 2 | 23.2 s | 1.28x |
+| 4 | 20.9 s | 1.42x |
+
+Real, but nowhere near 4x. One request already uses 1.5-2 cores' worth of work,
+and per-request time stretches once several run at once (8.1 s alone becomes
+20.0 s with four in flight), so the gain is a modest one and the machine gets
+busier rather than finishing four times sooner. Size a deployment on that
+number, not on the worker count. If you do need to serve a lot of people
+properly, run one worker per process under nginx and let nginx balance - the
+guide is `DEPLOY.md`.
+
+Two things the launcher handles for you, because both are easy to get wrong:
+
+- **Threads are split, not multiplied.** torch sizes its pool from the CPU
+  count, so four workers would between them ask for 64 threads on a 16-CPU box.
+  Unless `KOKORO_THREADS` is set, each worker is given `cpu_count / workers`
+  instead. A single worker is left exactly as it was.
+- **The count is capped at the CPU count.** More processes than cores cannot
+  help, and every worker is a whole interpreter with its own copy of the model -
+  **about 1.3 GB resident each**, not the 330 MB the weights weigh on disk. Four
+  workers want roughly 5 GB free. Get `MemoryError` and you have too many.
+
+On Windows, uvicorn sometimes logs a `WinError 10022` traceback while starting
+the workers and then restarts the one that failed
+([upstream bug](https://github.com/Kludex/uvicorn/issues/683)). It is harmless -
+count the `Started server process` lines, or hit `/health` a few times and watch
+`load_seconds` change, to see how many workers are actually serving.
 
 ### Standalone desktop app (.exe)
 
@@ -758,16 +824,19 @@ runs against a stub engine and needs no GUI, torch or display.
 ```
 app/
   engine.py           model loading, synthesis, voice catalog, wav/mp3 encoding
-  server.py           FastAPI app: /speak /preprocess /voices /health /warmup /docs
+  server.py           FastAPI app: /speak /preprocess /rules /voices /health /warmup /docs
+  launcher.py         worker count + thread budget for the HTTP service
   cli.py              argparse CLI
   desktop.py          Tkinter desktop app + testable SynthesisController
   weights.py          bundled-weights location, offline bootstrap, fetch command
   static/index.html   web UI, self-contained, no build step
-legal_preprocessor.py  legal-text cleaner behind /preprocess
+legal_preprocessor.py  legal-text cleaner behind /preprocess; config.json rule editing
 tests/
   test_api.py         64-check end-to-end suite
-  test_preprocessor.py  75-test preprocessor suite (unittest, no server needed)
+  test_preprocessor.py  85-test preprocessor suite (unittest, no server needed)
+  test_config_store.py 17-test config.json rule-editing suite (unittest, no server)
   test_desktop.py     desktop suite: controller, formatting, counter, weights
+  test_launcher.py    worker count, thread split, uvicorn invocation (no server)
   bench.py            throughput benchmark
 config.json           abbreviation / OCR / currency mappings for the preprocessor
 desktop_app.py        entry point for the frozen desktop executable

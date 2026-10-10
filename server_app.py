@@ -13,7 +13,13 @@ from the ``_internal`` directory beside it.
 Environment overrides (all optional):
     KOKORO_PORT    port to listen on            (default 8000)
     KOKORO_BIND    interface to bind            (default 127.0.0.1)
+    KOKORO_WORKERS server processes             (default 1, capped at the CPU count)
+    KOKORO_THREADS torch threads per process    (default: an even split of the CPUs)
     KOKORO_OUTPUT_DIR  where save=true writes   (default <exe folder>/output)
+
+More than one worker means more requests being served at the same time instead
+of queueing behind one another, at the cost of another ~1.3 GB resident process
+per worker. See :mod:`app.launcher` for why the thread budget is split with it.
 """
 
 from __future__ import annotations
@@ -75,8 +81,16 @@ def main(argv: list[str] | None = None) -> int:
     if args:
         port = int(args[0])
 
-    from app.server import app
-    import uvicorn
+    from app import launcher
+
+    try:
+        workers = launcher.resolve_workers()
+    except ValueError as exc:
+        # A mistyped KOKORO_WORKERS should not take the whole server down, and
+        # in a double-clicked build there is no traceback anyone will read.
+        print(f"  {exc}; starting one worker.")
+        workers = 1
+    threads = launcher.apply_thread_budget(workers)
 
     local_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     url = f"http://{local_host}:{port}/"
@@ -91,10 +105,16 @@ def main(argv: list[str] | None = None) -> int:
     print("  ----------")
     print(f"  Web UI : {url}")
     print(f"  API    : {url}docs")
+    if workers > 1:
+        print(f"  Workers: {workers} processes"
+              f"{f', {threads} threads each' if threads else ''}"
+              f"  (~1.3 GB RAM each)")
     print("  Close this window (or press Ctrl+C) to stop.")
-    print()
+    # Flush now rather than when the buffer fills: the banner has to be on screen
+    # before the first request, which is the whole point of printing it.
+    print(flush=True)
 
-    uvicorn.run(app, host=host, port=port, log_level="info", access_log=False)
+    launcher.serve(host, port, workers, access_log=False)
     return 0
 
 

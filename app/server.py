@@ -112,6 +112,19 @@ class PreprocessResponse(BaseModel):
     changed: bool = Field(..., description="False when the input was already clean.")
 
 
+class AbbreviationRequest(BaseModel):
+    abbreviation: str = Field(..., min_length=1, max_length=200)
+    full: str = Field(..., min_length=1, max_length=200)
+
+
+class AbbreviationRemoveRequest(BaseModel):
+    abbreviation: str = Field(..., min_length=1, max_length=200)
+
+
+class RemovalWordRequest(BaseModel):
+    word: str = Field(..., min_length=1, max_length=200)
+
+
 # ------------------------------------------------------------------- routes
 
 @app.get("/health")
@@ -164,6 +177,75 @@ def preprocess(req: PreprocessRequest) -> PreprocessResponse:
     return PreprocessResponse(
         text=cleaned, changed=cleaned.strip() != req.text.strip()
     )
+
+
+# --------------------------------------------------------------- rule editing
+
+def _rules_payload(config: dict[str, Any]) -> dict:
+    """The editable rule set, each entry flagged as built-in or user-added."""
+    default_abvs = set(LP.DEFAULTS.get("abbreviations", {}))
+    default_removals = set(LP.DEFAULTS.get("watermark_markers", []))
+    abbreviations = [
+        {"abbreviation": k, "full": v, "builtin": k in default_abvs}
+        for k, v in config.get("abbreviations", {}).items()
+        if isinstance(k, str) and k and not k.startswith("_")
+        and isinstance(v, str) and v
+    ]
+    abbreviations.sort(key=lambda r: (r["abbreviation"].lower(), r["abbreviation"]))
+    removals = [
+        {"word": w, "builtin": w in default_removals}
+        for w in config.get("watermark_markers", [])
+        if isinstance(w, str) and w.strip()
+    ]
+    removals.sort(key=lambda r: (r["word"].lower(), r["word"]))
+    return {"path": str(LP.config_path() or ""), "abbreviations": abbreviations,
+            "removals": removals}
+
+
+@app.get("/rules")
+def rules() -> dict:
+    """List the abbreviation and auto-remove rules currently in effect."""
+    return _rules_payload(LP.load_config())
+
+
+@app.post("/rules/abbreviations")
+def add_abbreviation_rule(req: AbbreviationRequest) -> dict:
+    """Add or replace an abbreviation → expansion, applied immediately."""
+    try:
+        config = LP.add_abbreviation(req.abbreviation, req.full)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _rules_payload(config)
+
+
+@app.post("/rules/abbreviations/remove")
+def remove_abbreviation_rule(req: AbbreviationRemoveRequest) -> dict:
+    """Stop expanding an abbreviation (built-ins are disabled, not deleted)."""
+    try:
+        config = LP.remove_abbreviation(req.abbreviation)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _rules_payload(config)
+
+
+@app.post("/rules/removals")
+def add_removal_rule(req: RemovalWordRequest) -> dict:
+    """Add a word/garble that is auto-removed, applied immediately."""
+    try:
+        config = LP.add_watermark(req.word)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _rules_payload(config)
+
+
+@app.post("/rules/removals/remove")
+def remove_removal_rule(req: RemovalWordRequest) -> dict:
+    """Stop auto-removing a word."""
+    try:
+        config = LP.remove_watermark(req.word)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _rules_payload(config)
 
 
 @app.post("/speak", response_class=Response)

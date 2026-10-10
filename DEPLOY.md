@@ -87,6 +87,11 @@ an empty `abbreviations` object, a non-string value or an `editorial_markers`
 list of junk all get ignored rather than raising, so you can trim the file down
 while you experiment.
 
+The web UI can edit the abbreviation and auto-removal rules through `GET/POST
+/rules`; the server applies the change to `config.json` with an atomic rename
+and reloads the in-memory config, so those edits take effect immediately
+instead of waiting for a restart.
+
 ### The preprocessor is pure standard library
 
 `legal_preprocessor.py` uses nothing outside the Python standard library: no C
@@ -274,10 +279,23 @@ It reports `ready`, `device`, `model`, `load_seconds`, and the voice count -
   `PrivateDevices=yes` in the unit is safe. No `espeak` or ALSA packages needed
   either - `espeakng_loader` ships Linux `.so` binaries in the venv
   (`manylinux_2_17_x86_64`), which is what covers the non-English locales.
-- **One worker, on purpose.** Each worker loads its own 330 MB copy of the
-  model, and synthesis is serialised behind a lock inside the process anyway.
-  `--workers 2` doubles memory for no throughput gain. For genuine parallelism,
-  run N replicas behind nginx and let nginx balance.
+- **One worker by default.** Synthesis is serialised behind a lock inside the
+  process, so `--workers` is not what makes a *single* request faster - nothing
+  does. It only helps when several requests arrive at once, and each worker is a
+  whole interpreter with its own copy of the model: **~1.3 GB resident each**, so
+  four workers want 5 GB and `MemoryMax=4G` in the unit will kill them (raise it
+  to `MemoryMax=8G` first). Measured on a 16-CPU box, four concurrent requests
+  took 29.7 s on one worker and 20.9 s on four; that is 1.42x, not 4x. If that
+  is not enough, run N replicas behind nginx and let nginx balance.
+- **If you raise the worker count, lower the thread count with it.** torch sizes
+  its pool from the CPU count, so N workers will ask for N x cpu_count threads
+  and fight over the same cores. `app/launcher.py` splits the budget on Windows;
+  on Linux, set it in the unit:
+
+  ```
+  Environment=KOKORO_THREADS=2
+  ExecStart=... --workers 4
+  ```
 - **`/preprocess` is not behind that lock.** The endpoint is a plain `def`, so
   Starlette runs it in the threadpool rather than on the event loop. Auto-format
   requests therefore overlap each other and overlap synthesis instead of
@@ -347,7 +365,7 @@ routine code push.
 | 422, `needs a language pack` | Requested a `jf_*`/`zf_*` voice. See the language-pack note in README section 5. |
 | First request hangs, then works | Lazy model load. Hit `/warmup` or wait out the ~6 s. |
 | `403` from nginx | SELinux is denying nginx the loopback proxy. `sudo setsebool -P httpd_can_proxy_connect 1`. |
-| Out of memory | Model is ~500 MB resident per worker. Raise `MemoryMax` or keep `--workers 1`. |
+| Out of memory | A worker is ~1.3 GB resident. Raise `MemoryMax` or lower `KOKORO_WORKERS`. |
 | Service restarts in a loop | `journalctl -u kokoro-tts -n 50`. Usually a `ProtectSystem=strict` write to a path outside `ReadWritePaths`. |
 
 ---
